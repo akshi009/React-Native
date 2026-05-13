@@ -1,6 +1,6 @@
+import { DefaultTheme, ThemeProvider } from "@react-navigation/native";
 import { Slot } from "expo-router";
 import { View } from "react-native";
-import { ThemeProvider, DefaultTheme } from "@react-navigation/native";
 import "../global.css";
 
 export default function RootLayout() {
@@ -10,5 +10,6 @@ export default function RootLayout() {
         <Slot />
       </View>
     </ThemeProvider>
+
   );
 }
