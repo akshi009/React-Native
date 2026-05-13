@@ -1,3 +1,11 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 255 255 255;
+    --primary: 10 126 164;
+    --text: 17 24 28;
+  }
+}
