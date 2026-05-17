@@ -39,6 +39,7 @@ const SignUp = () => {
             }
 
             reset()
+            setCode('')
         } catch (error) {
             console.log(error)
             Toast.show({
@@ -71,6 +72,7 @@ const SignUp = () => {
                     type: 'success',
                     text1: 'Account created successfully',
                 })
+                setCode('')
 
             }
         }
@@ -83,7 +85,7 @@ const SignUp = () => {
         }
     }
 
-    if (signUp.status === 'missing_requirements') {
+    if (signUp.status === 'missing_requirements' && signUp.unverifiedFields.includes('email_address') && signUp.missingFields.length === 0) {
         return (
             <SafeAreaView style={{ flex: 1 }}>
                 <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
@@ -129,7 +131,9 @@ const SignUp = () => {
                                     textAlign: 'center',
                                 }}>
                                     Didn't receive a verification code?
-                                    (Even Though We send you but still..) <TouchableOpacity onPress={signUp?.verifications.sendEmailCode}><Text style={{ color: "#008080", fontWeight: "bold" }}>Resend Code</Text></TouchableOpacity>
+                                    (Even Though We send you but still..)
+                                    <TouchableOpacity onPress={async () => { await signUp?.verifications.sendEmailCode(); setCode('') }}><Text style={{ color: "#008080", fontWeight: "bold" }}>
+                                        Resend Code</Text></TouchableOpacity>
                                 </Text>
                             </View>
                         </View>
@@ -240,7 +244,7 @@ const SignUp = () => {
                                     </>
                                 )}
                             />
-                            <Controller
+                            {/* <Controller
                                 control={control}
                                 name='confirmPassword'
                                 rules={{ required: "Please confirm your password" }}
@@ -258,7 +262,7 @@ const SignUp = () => {
 
                                     </>
                                 )}
-                            />
+                            /> */}
                             <TouchableOpacity
                                 disabled={loading}
                                 style={style.submitButton}
