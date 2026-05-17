@@ -65,4 +65,16 @@ export const style = StyleSheet.create({
         width: "100%",
         textAlign: "left",
     },
+    row: {
+        flexDirection: 'row',
+        width: '100%',
+        gap: 10,
+    },
+
+    flexInput: {
+        flex: 1,
+    },
+
+
+
 })
