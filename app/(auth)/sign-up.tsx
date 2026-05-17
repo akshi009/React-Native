@@ -1,6 +1,6 @@
 import { useAuth, useSignUp } from '@clerk/expo'
 import { Link, useRouter } from 'expo-router'
-import React from 'react'
+import React, { useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { Image, Keyboard, ScrollView, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -10,9 +10,13 @@ import { style } from './signup.style'
 const SignUp = () => {
     const { control, handleSubmit, reset } = useForm()
     const { signUp, fetchStatus, errors } = useSignUp()
+    const [code, setCode] = useState<any>('')
     const { isSignedIn } = useAuth()
     const router = useRouter()
     const loading = fetchStatus === "fetching"
+    if (signUp.status === 'complete' || isSignedIn) {
+        return null
+    }
 
     const onSubmit = async (data: any) => {
         Keyboard.dismiss()
@@ -42,6 +46,97 @@ const SignUp = () => {
                 text1: 'Error creating account!',
             })
         }
+    }
+
+    const handleVerifyCode = async () => {
+        Keyboard.dismiss()
+        try {
+            const { error } = await signUp?.verifications.verifyEmailCode({
+                code,
+            })
+            if (error) {
+                alert(error.message)
+                return
+            }
+            if (signUp.status === 'complete') {
+
+                signUp.finalize({
+                    navigate: ({ decorateUrl }) => {
+                        const url = decorateUrl("/")
+                        console.log(url)
+                        router.replace(url as any)
+                    }
+                })
+                Toast.show({
+                    type: 'success',
+                    text1: 'Account created successfully',
+                })
+
+            }
+        }
+        catch (error) {
+            console.log(error)
+            Toast.show({
+                type: 'error',
+                text1: 'Error creating account!',
+            })
+        }
+    }
+
+    if (signUp.status === 'missing_requirements') {
+        return (
+            <SafeAreaView style={{ flex: 1 }}>
+                <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+                    <ScrollView keyboardShouldPersistTaps="handled">
+                        <View style={style.container}>
+                            <Image
+                                source={require('../../assets/images/kribb.png')}
+                                style={style.logo}
+                                resizeMode='contain'
+                            />
+
+                            <Text style={style.heading}>Sign Up</Text>
+
+                            <Text style={style.subHeading}>
+                                Enter Verfication Code sent to your email
+                            </Text>
+                            <View style={style.signupForm}>
+                                <View style={style.row}>
+
+                                    <View style={style.flexInput}>
+                                        <TextInput
+                                            style={style.input}
+                                            onChangeText={setCode}
+                                            value={code}
+                                            placeholder="Enter Verification Code"
+                                            keyboardType='number-pad'
+                                        />
+
+                                    </View>
+
+                                </View>
+                                <TouchableOpacity
+                                    style={style.submitButton}
+                                    onPress={handleVerifyCode}
+                                    disabled={loading}
+                                >
+                                    <Text style={style.submitButtonText}>
+                                        {loading ? 'Verifying...' : 'Verify Account'}
+                                    </Text>
+                                </TouchableOpacity>
+                                <Text style={{
+                                    marginTop: 10,
+                                    textAlign: 'center',
+                                }}>
+                                    Didn't receive a verification code?
+                                    (Even Though We send you but still..) <TouchableOpacity onPress={signUp?.verifications.sendEmailCode}><Text style={{ color: "#008080", fontWeight: "bold" }}>Resend Code</Text></TouchableOpacity>
+                                </Text>
+                            </View>
+                        </View>
+                    </ScrollView>
+                </TouchableWithoutFeedback>
+            </SafeAreaView>
+        )
     }
 
     return (
