@@ -3,6 +3,7 @@ import { tokenCache } from '@clerk/expo/token-cache';
 import { DefaultTheme, ThemeProvider } from "@react-navigation/native";
 import { Slot } from "expo-router";
 import { View } from "react-native";
+import Toast from 'react-native-toast-message';
 import "../global.css";
 
 const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!;
@@ -17,6 +18,7 @@ export default function RootLayout() {
       <ThemeProvider value={DefaultTheme}>
         <View style={{ flex: 1, backgroundColor: 'white' }}>
           <Slot />
+          <Toast />
         </View>
       </ThemeProvider>
     </ClerkProvider>
