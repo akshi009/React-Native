@@ -22,7 +22,6 @@ const profile = () => {
                     }}
                     onPress={async () => {
                         await signOut();
-                        // router.replace('/sign-in')
 
                     }}>
                     <Text style={{ color: "#fff", fontWeight: 'bold' }}>Logout</Text>
