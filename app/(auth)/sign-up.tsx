@@ -166,15 +166,16 @@ const SignUp = () => {
                                 <View style={style.flexInput}>
                                     <Controller
                                         control={control}
-                                        name="fullName"
-                                        rules={{ required: "Full Name is required" }}
+                                        name="firstName"
+                                        rules={{ required: "First Name is required" }}
                                         render={({ field: { onChange, value }, fieldState: { error } }) => (
                                             <>
                                                 <TextInput
                                                     style={style.input}
                                                     onChangeText={onChange}
                                                     value={value}
-                                                    placeholder="Full Name"
+                                                    placeholder="First Name"
+                                                    placeholderTextColor="#9CA3AF"
                                                 />
                                                 {error && <Text style={style.errorText}>{error.message}</Text>}
                                             </>
@@ -183,6 +184,27 @@ const SignUp = () => {
                                 </View>
 
                                 <View style={style.flexInput}>
+                                    <Controller
+                                        control={control}
+                                        name="lastName"
+                                        rules={{ required: "Last Name is required" }}
+                                        render={({ field: { onChange, value }, fieldState: { error } }) => (
+                                            <>
+                                                <TextInput
+                                                    style={style.input}
+                                                    onChangeText={onChange}
+                                                    value={value}
+                                                    placeholder="Last Name"
+                                                    placeholderTextColor="#9CA3AF"
+                                                />
+                                                {error && <Text style={style.errorText}>{error.message}</Text>}
+                                            </>
+                                        )}
+                                    />
+                                </View>
+                           </View>
+
+                                
                                     <Controller
                                         control={control}
                                         name="email"
@@ -196,14 +218,15 @@ const SignUp = () => {
                                                     placeholder="Email"
                                                     keyboardType='email-address'
                                                     autoCapitalize='none'
+                                                    placeholderTextColor="#9CA3AF"
                                                 />
                                                 {error && <Text style={style.errorText}>{error.message}</Text>}
                                             </>
                                         )}
                                     />
-                                </View>
+                                
 
-                            </View>
+                           
 
                             {/* <Controller
                                 control={control}

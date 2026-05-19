@@ -124,6 +124,7 @@ const SignIn = () => {
                                             onChangeText={setCode}
                                             value={code}
                                             placeholder="Enter Verification Code"
+                                            placeholderTextColor="#9CA3AF"
                                             keyboardType='number-pad'
                                         />
 
@@ -190,6 +191,7 @@ const SignIn = () => {
                                                     value={value}
                                                     placeholder="Email"
                                                     keyboardType='email-address'
+                                                    placeholderTextColor="#9CA3AF"
                                                     autoCapitalize='none'
                                                 />
                                                 {error && <Text style={style.errorText}>{error.message}</Text>}
