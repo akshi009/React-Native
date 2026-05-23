@@ -2,11 +2,11 @@ import React from 'react'
 import { Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
-export default function Settings() {
+export default function Search() {
     return (
         <SafeAreaView>
             <View>
-                <Text>Settings</Text>
+                <Text>Search</Text>
             </View>
         </SafeAreaView>
     )
