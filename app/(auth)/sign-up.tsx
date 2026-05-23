@@ -202,31 +202,31 @@ const SignUp = () => {
                                         )}
                                     />
                                 </View>
-                           </View>
+                            </View>
 
-                                
-                                    <Controller
-                                        control={control}
-                                        name="email"
-                                        rules={{ required: "Email is required" }}
-                                        render={({ field: { onChange, value, }, fieldState: { error } }) => (
-                                            <>
-                                                <TextInput
-                                                    style={style.input}
-                                                    onChangeText={onChange}
-                                                    value={value}
-                                                    placeholder="Email"
-                                                    keyboardType='email-address'
-                                                    autoCapitalize='none'
-                                                    placeholderTextColor="#9CA3AF"
-                                                />
-                                                {error && <Text style={style.errorText}>{error.message}</Text>}
-                                            </>
-                                        )}
-                                    />
-                                
 
-                           
+                            <Controller
+                                control={control}
+                                name="email"
+                                rules={{ required: "Email is required" }}
+                                render={({ field: { onChange, value, }, fieldState: { error } }) => (
+                                    <>
+                                        <TextInput
+                                            style={style.input}
+                                            onChangeText={onChange}
+                                            value={value}
+                                            placeholder="Email"
+                                            keyboardType='email-address'
+                                            autoCapitalize='none'
+                                            placeholderTextColor="#9CA3AF"
+                                        />
+                                        {error && <Text style={style.errorText}>{error.message}</Text>}
+                                    </>
+                                )}
+                            />
+
+
+
 
                             {/* <Controller
                                 control={control}

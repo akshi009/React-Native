@@ -62,7 +62,7 @@ function IosTabLayout() {
                 <Icon sf="house.fill" drawable="custom_android_drawable" />
             </NativeTabs.Trigger>
             <NativeTabs.Trigger name="search">
-                <Icon sf="search.fill" drawable="custom_settings_drawable" />
+                <Icon sf="magnifyingglass" drawable="custom_settings_drawable" />
                 <Label>Search</Label>
             </NativeTabs.Trigger>
 
