@@ -1,4 +1,6 @@
-import { useUser } from '@clerk/expo'
+import { createClerkSupabaseClient } from '@/lib/supabase'
+import { useAuth, useUser } from '@clerk/expo'
+import { useQuery } from '@tanstack/react-query'
 import { useFocusEffect } from 'expo-router'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import {
@@ -30,16 +32,16 @@ const formatPrice = (price: number): string => {
 
 // ── Light theme tokens ──────────────────────────────────────────
 const C = {
-    bg: '#f5f6fa8f',
-    surface: '#FFFFFF',
-    surfaceAlt: '#f2f3f897',
-    border: '#E2E5EC',
-    accent: '#2563EB',
-    accentLight: '#EBF2FF',
-    accentText: '#1D4ED8',
-    success: '#059669',
+    bg: '#F5F6FA',   // page background
+    surface: '#FFFFFF',   // cards, inputs
+    surfaceAlt: '#EEF0F5',   // stat chips, filter pills inactive
+    border: '#E2E5EC',   // dividers
+    accent: '#2563EB',   // primary blue
+    accentLight: '#EBF2FF',   // badge bg, tint fills
+    accentText: '#1D4ED8',   // text on accentLight
+    success: '#059669',   // price green
     successLight: '#D1FAE5',
-    danger: '#DC2626',
+    danger: '#DC2626',   // sold badge
     dangerLight: '#FEE2E2',
     textPrimary: '#0F172A',
     textSecondary: '#64748B',
@@ -49,9 +51,51 @@ const C = {
 
 export default function Home() {
     const { user } = useUser()
+    const { getToken } = useAuth()
     const [loading, setLoading] = useState(false)
     const [activeFilter, setActiveFilter] = useState('All')
     const [activeCarouselIndex, setActiveCarouselIndex] = useState(0)
+    const [savedIds, setSavedIds] = useState<Set<string>>(new Set())
+
+    const supabase = createClerkSupabaseClient(getToken)
+
+    const toggleSave = async (id: string) => {
+        try {
+            if (!savedIds.has(id)) {
+                const { data, error } = await supabase.from('saved_properties').insert({ property_id: id, user_clerk_id: user?.id }).select()
+                if (error) return alert(error.message)
+
+            }
+            else {
+                const { data, error } = await supabase.from('saved_properties').delete().eq('property_id', id).eq('user_clerk_id', user?.id).select()
+                if (error) return alert(error.message)
+            }
+            refetch()
+
+        } catch (error) {
+            alert(error)
+        }
+    }
+
+    const fetchSavedIds = async () => {
+        try {
+            const res = await supabase.from('saved_properties').select().eq('user_clerk_id', user?.id)
+            if (res.error) return alert(res.error.message)
+            return res.data
+        } catch (error) {
+            alert(error)
+        }
+    }
+
+    const { data: saved, refetch } = useQuery({ queryKey: ['savedIds'], queryFn: fetchSavedIds })
+
+    useFocusEffect(
+        useCallback(() => {
+            const savedIds = saved?.map((item: any) => item.property_id) ?? []
+            setSavedIds(new Set(savedIds))
+        }, [saved])
+    )
+
     const carouselRef = useRef<ScrollView>(null)
 
     const properties = useProductStore((state: any) => state.properties ?? [])
@@ -407,15 +451,35 @@ export default function Home() {
                                         )}
                                     </View>
 
+                                    {/* Save Button overlaid on image */}
+                                    <TouchableOpacity
+                                        onPress={() => toggleSave(item.id)}
+                                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                                        style={{
+                                            position: 'absolute',
+                                            top: 8,
+                                            right: 8,
+                                            width: 28, height: 28,
+                                            borderRadius: 999,
+                                            backgroundColor: savedIds.has(item.id) ? C.accentLight : C.surfaceAlt,
+                                            alignItems: 'center', justifyContent: 'center',
+                                            zIndex: 10,
+                                        }}
+                                    >
+                                        <Text style={{ fontSize: 14 }}>
+                                            {savedIds.has(item.id) ? '❤️' : '🤍'}
+                                        </Text>
+                                    </TouchableOpacity>
+
                                     {/* Card body */}
                                     <View style={{ padding: 10 }}>
-                                        <Text style={{ color: C.success, fontSize: 14, fontWeight: '700', marginBottom: 2 }}>
+                                        <Text style={{ color: C.success, fontSize: 14, fontWeight: '800', marginBottom: 2 }}>
                                             {formatPrice(item.price)}
                                         </Text>
-                                        <Text numberOfLines={1} style={{ color: C.textPrimary, fontSize: 13, fontWeight: '600', marginBottom: 4 }}>
+                                        <Text numberOfLines={1} style={{ color: C.textPrimary, fontSize: 13, fontWeight: '700', marginBottom: 4 }}>
                                             {item.title}
                                         </Text>
-                                        <Text numberOfLines={1} style={{ color: C.textMuted, fontSize: 11, marginBottom: 12 }}>
+                                        <Text numberOfLines={1} style={{ color: C.textMuted, fontSize: 11, marginBottom: 8 }}>
                                             {item.address}, {item.city}
                                         </Text>
 
@@ -440,7 +504,7 @@ export default function Home() {
                                                         }} />
                                                     )}
                                                     <View style={{ flex: 1, alignItems: 'center', paddingVertical: 6 }}>
-                                                        <Text style={{ color: C.textPrimary, fontSize: 12 }}>
+                                                        <Text style={{ color: C.textPrimary, fontSize: 12, fontWeight: '700' }}>
                                                             {stat.value}
                                                         </Text>
                                                         <Text style={{ color: C.textMuted, fontSize: 9, marginTop: 1 }}>
