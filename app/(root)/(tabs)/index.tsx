@@ -2,7 +2,7 @@ import { fetchSavedIds, toggleSave } from '@/hooks/save_property'
 import { createClerkSupabaseClient } from '@/lib/supabase'
 import { useAuth, useUser } from '@clerk/expo'
 import { useQuery } from '@tanstack/react-query'
-import { useFocusEffect } from 'expo-router'
+import { router, useFocusEffect } from 'expo-router'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import {
     Dimensions,
@@ -148,20 +148,13 @@ export default function Home() {
                         </Text>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                        <TouchableOpacity style={{
-                            width: 40, height: 40, borderRadius: 20,
-                            backgroundColor: C.surface,
-                            borderWidth: 1, borderColor: C.border,
-                            alignItems: 'center', justifyContent: 'center',
-                        }}>
-                            <Text style={{ fontSize: 18 }}>🔔</Text>
-                        </TouchableOpacity>
+
                         <View style={{
                             width: 40, height: 40, borderRadius: 20,
                             backgroundColor: C.accent,
                             alignItems: 'center', justifyContent: 'center',
-                        }}>
-                            <Text style={{ color: C.white, fontWeight: '800', fontSize: 14 }}>
+                        }} >
+                            <Text onPress={() => router.push('/(root)/(tabs)/profile')} style={{ color: C.white, fontWeight: '800', fontSize: 14 }}>
                                 {initials}
                             </Text>
                         </View>
