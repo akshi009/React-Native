@@ -1,3 +1,4 @@
+import { fetchSavedIds, toggleSave } from '@/hooks/save_property'
 import { createClerkSupabaseClient } from '@/lib/supabase'
 import { useAuth, useUser } from '@clerk/expo'
 import { useQuery } from '@tanstack/react-query'
@@ -51,49 +52,27 @@ const C = {
 
 export default function Home() {
     const { user } = useUser()
-    const { getToken } = useAuth()
+
     const [loading, setLoading] = useState(false)
     const [activeFilter, setActiveFilter] = useState('All')
     const [activeCarouselIndex, setActiveCarouselIndex] = useState(0)
     const [savedIds, setSavedIds] = useState<Set<string>>(new Set())
-
+    const { getToken } = useAuth()
     const supabase = createClerkSupabaseClient(getToken)
+    const { data: saved, refetch } = useQuery({ queryKey: ['savedIds'], queryFn: () => fetchSavedIds(supabase, user?.id as string) })
 
-    const toggleSave = async (id: string) => {
-        try {
-            if (!savedIds.has(id)) {
-                const { data, error } = await supabase.from('saved_properties').insert({ property_id: id, user_clerk_id: user?.id }).select()
-                if (error) return alert(error.message)
-
-            }
-            else {
-                const { data, error } = await supabase.from('saved_properties').delete().eq('property_id', id).eq('user_clerk_id', user?.id).select()
-                if (error) return alert(error.message)
-            }
-            refetch()
-
-        } catch (error) {
-            alert(error)
-        }
-    }
-
-    const fetchSavedIds = async () => {
-        try {
-            const res = await supabase.from('saved_properties').select().eq('user_clerk_id', user?.id)
-            if (res.error) return alert(res.error.message)
-            return res.data
-        } catch (error) {
-            alert(error)
-        }
-    }
-
-    const { data: saved, refetch } = useQuery({ queryKey: ['savedIds'], queryFn: fetchSavedIds })
 
     useFocusEffect(
         useCallback(() => {
             const savedIds = saved?.map((item: any) => item.property_id) ?? []
             setSavedIds(new Set(savedIds))
         }, [saved])
+    )
+
+    useFocusEffect(
+        useCallback(() => {
+            refetch()
+        }, [])
     )
 
     const carouselRef = useRef<ScrollView>(null)
@@ -299,10 +278,46 @@ export default function Home() {
                                         borderBottomRightRadius: 22,
                                     }} />
 
+
+                                    {/* Save Button */}
+                                    <TouchableOpacity
+                                        onPress={async () => {
+                                            await toggleSave(
+                                                item.id,
+                                                saved,
+                                                refetch,
+                                                supabase,
+                                                user?.id as string,
+                                            )
+
+                                            refetch()
+                                        }}
+                                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                                        style={{
+                                            position: 'absolute',
+                                            top: 14,
+                                            right: 14,
+                                            width: 34,
+                                            height: 34,
+                                            borderRadius: 999,
+                                            backgroundColor: savedIds.has(item.id)
+                                                ? 'rgba(255,255,255,0.95)'
+                                                : 'rgba(255,255,255,0.22)',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            backdropFilter: 'blur(8px)',
+                                            zIndex: 10,
+                                        }}
+                                    >
+                                        <Text style={{ fontSize: 16 }}>
+                                            {savedIds.has(item.id) ? '❤️' : '🤍'}
+                                        </Text>
+                                    </TouchableOpacity>
+
                                     {/* Featured badge */}
                                     <View style={{
                                         position: 'absolute',
-                                        top: 14, right: 14,
+                                        top: 14, left: 14,
                                         backgroundColor: C.white,
                                         paddingHorizontal: 12,
                                         paddingVertical: 5,
@@ -453,7 +468,7 @@ export default function Home() {
 
                                     {/* Save Button overlaid on image */}
                                     <TouchableOpacity
-                                        onPress={() => toggleSave(item.id)}
+                                        onPress={() => toggleSave(item.id, saved, refetch, supabase, user?.id as string)}
                                         hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                                         style={{
                                             position: 'absolute',
