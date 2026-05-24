@@ -16,24 +16,24 @@ function AndroidTabLayout() {
                     }
                 }}
             />
-            <Tabs.Screen name="search"
+            {/* <Tabs.Screen name="search"
                 options={{
                     title: 'Search',
                     tabBarIcon: ({ color, size }) => {
                         return <Ionicons name='search' color={color} size={size} />
                     }
                 }}
+            /> */}
+            {/* {isAdmin && */}
+            <Tabs.Screen name="create"
+                options={{
+                    title: 'Create',
+                    tabBarIcon: ({ color, size }) => {
+                        return <Ionicons name='add-circle' color={color} size={size} />
+                    }
+                }}
             />
-            {isAdmin &&
-                <Tabs.Screen name="create"
-                    options={{
-                        title: 'Create',
-                        tabBarIcon: ({ color, size }) => {
-                            return <Ionicons name='add-circle' color={color} size={size} />
-                        }
-                    }}
-                />
-            }
+            {/* } */}
             <Tabs.Screen name="save"
                 options={{
                     title: 'Save',

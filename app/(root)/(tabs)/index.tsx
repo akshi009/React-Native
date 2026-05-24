@@ -12,6 +12,7 @@ import {
     NativeSyntheticEvent,
     ScrollView,
     Text,
+    TextInput,
     TouchableOpacity,
     View,
 } from 'react-native'
@@ -21,8 +22,6 @@ import { useProductStore } from '../../../store/productStore'
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window')
 const CARD_WIDTH = SCREEN_WIDTH - 64
-
-const FILTER_CATEGORIES = ['All', 'Apartment', 'Villa', 'Plot', 'Commercial', 'Studio']
 
 const formatPrice = (price: number): string => {
     if (price >= 10000000) return `₹${(price / 10000000).toFixed(1).replace(/\.0$/, '')} Cr`
@@ -52,7 +51,7 @@ const C = {
 
 export default function Home() {
     const { user } = useUser()
-
+    const [search, setSearch] = useState('')
     const [loading, setLoading] = useState(false)
     const [activeFilter, setActiveFilter] = useState('All')
     const [activeCarouselIndex, setActiveCarouselIndex] = useState(0)
@@ -79,13 +78,24 @@ export default function Home() {
 
     const properties = useProductStore((state: any) => state.properties ?? [])
 
+    const filteredProperties = useMemo(() => {
+        return properties.filter((item: any) => {
+            const matchesSearch =
+                item.title?.toLowerCase().includes(search.toLowerCase()) ||
+                item.city?.toLowerCase().includes(search.toLowerCase()) ||
+                item.address?.toLowerCase().includes(search.toLowerCase())
+
+            return matchesSearch
+        })
+    }, [properties, search])
+
     const featuredProperties = useMemo(
-        () => properties.filter((p: any) => p.is_featured),
-        [properties]
+        () => filteredProperties.filter((p: any) => p.is_featured),
+        [filteredProperties]
     )
     const recommandedProperties = useMemo(
-        () => properties.filter((p: any) => !p.is_featured),
-        [properties]
+        () => filteredProperties.filter((p: any) => !p.is_featured),
+        [filteredProperties]
     )
 
     useFocusEffect(
@@ -122,6 +132,8 @@ export default function Home() {
         .join('')
         .slice(0, 2)
         .toUpperCase() ?? 'GU'
+
+
 
     return (
         <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
@@ -162,6 +174,7 @@ export default function Home() {
                 </View>
 
                 {/* ── Search Bar ── */}
+
                 <TouchableOpacity
                     activeOpacity={0.8}
                     style={{
@@ -178,41 +191,13 @@ export default function Home() {
                         borderColor: C.border,
                     }}
                 >
-                    <Text style={{ fontSize: 18, color: C.accent }}>⌕</Text>
-                    <Text style={{ color: C.textMuted, fontSize: 14 }}>Search properties, cities...</Text>
+                    <Text style={{ fontSize: 20, color: C.accent }}>⌕</Text>
+                    <TextInput onChangeText={setSearch} value={search} placeholder='Search properties, cities...' placeholderTextColor={C.textMuted} style={{ color: C.textMuted, fontSize: 14 }}>
+
+                    </TextInput>
                 </TouchableOpacity>
 
-                {/* ── Filter Pills ── */}
-                <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingBottom: 4 }}
-                    style={{ marginBottom: 24 }}
-                >
-                    {FILTER_CATEGORIES.map((cat) => (
-                        <TouchableOpacity
-                            key={cat}
-                            onPress={() => setActiveFilter(cat)}
-                            activeOpacity={0.8}
-                            style={{
-                                backgroundColor: activeFilter === cat ? C.accent : C.surface,
-                                paddingHorizontal: 18,
-                                paddingVertical: 8,
-                                borderRadius: 999,
-                                borderWidth: 1,
-                                borderColor: activeFilter === cat ? C.accent : C.border,
-                            }}
-                        >
-                            <Text style={{
-                                color: activeFilter === cat ? C.white : C.textSecondary,
-                                fontSize: 13,
-                                fontWeight: '600',
-                            }}>
-                                {cat}
-                            </Text>
-                        </TouchableOpacity>
-                    ))}
-                </ScrollView>
+
 
                 {/* ── Featured Carousel ── */}
                 {featuredProperties?.length > 0 && (
@@ -225,9 +210,7 @@ export default function Home() {
                             paddingHorizontal: 16,
                         }}>
                             <Text style={{ fontSize: 17, fontWeight: '700', color: C.textPrimary }}>✦ Featured</Text>
-                            <TouchableOpacity>
-                                <Text style={{ fontSize: 13, color: C.accent, fontWeight: '600' }}>See all</Text>
-                            </TouchableOpacity>
+
                         </View>
 
                         <ScrollView
@@ -389,9 +372,7 @@ export default function Home() {
                         marginBottom: 14,
                     }}>
                         <Text style={{ fontSize: 17, fontWeight: '700', color: C.textPrimary }}>Recommended</Text>
-                        <TouchableOpacity>
-                            <Text style={{ fontSize: 13, color: C.accent, fontWeight: '600' }}>See all</Text>
-                        </TouchableOpacity>
+
                     </View>
 
                     {recommandedProperties?.length === 0 && !loading ? (
