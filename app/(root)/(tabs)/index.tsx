@@ -77,6 +77,7 @@ export default function Home() {
     const carouselRef = useRef<ScrollView>(null)
 
     const properties = useProductStore((state: any) => state.properties ?? [])
+    const propertyTypes = ["All", ...new Set(properties.map((item: any) => item.type))]
 
     const filteredProperties = useMemo(() => {
         return properties.filter((item: any) => {
@@ -85,9 +86,12 @@ export default function Home() {
                 item.city?.toLowerCase().includes(search.toLowerCase()) ||
                 item.address?.toLowerCase().includes(search.toLowerCase())
 
-            return matchesSearch
+            const matchesType = activeFilter == 'All' || item.type == activeFilter
+            return matchesSearch && matchesType
         })
-    }, [properties, search])
+    }, [properties, search, activeFilter])
+
+
 
     const featuredProperties = useMemo(
         () => filteredProperties.filter((p: any) => p.is_featured),
@@ -197,7 +201,36 @@ export default function Home() {
                     </TextInput>
                 </TouchableOpacity>
 
-
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingBottom: 4 }}
+                    style={{ marginBottom: 24 }}
+                >
+                    {propertyTypes.map((cat: any) => (
+                        <TouchableOpacity
+                            key={cat.id}
+                            onPress={() => setActiveFilter(cat)}
+                            activeOpacity={0.8}
+                            style={{
+                                backgroundColor: activeFilter === cat ? C.accent : C.surface,
+                                paddingHorizontal: 18,
+                                paddingVertical: 8,
+                                borderRadius: 999,
+                                borderWidth: 1,
+                                borderColor: activeFilter === cat ? C.accent : C.border,
+                            }}
+                        >
+                            <Text style={{
+                                color: activeFilter === cat ? C.white : C.textSecondary,
+                                fontSize: 13,
+                                fontWeight: '600',
+                            }}>
+                                {(cat)}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+                </ScrollView>
 
                 {/* ── Featured Carousel ── */}
                 {featuredProperties?.length > 0 && (
@@ -310,9 +343,14 @@ export default function Home() {
                                         bottom: 0, left: 0, right: 0,
                                         padding: 16,
                                     }}>
-                                        <Text style={{ color: '#6EE7B7', fontSize: 18, fontWeight: '800', marginBottom: 2 }}>
-                                            {formatPrice(item.price)}
-                                        </Text>
+                                        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                                            <Text style={{ color: '#6EE7B7', fontSize: 18, fontWeight: '800', marginBottom: 2 }}>
+                                                {formatPrice(item.price)}
+                                            </Text>
+                                            <Text style={{ backgroundColor: '#6EE7B7', padding: 5, borderRadius: 5, fontSize: 12, marginBottom: 10 }}>
+                                                {item.type}
+                                            </Text>
+                                        </View>
                                         <Text numberOfLines={1} style={{ color: C.white, fontSize: 15, fontWeight: '700', marginBottom: 2 }}>
                                             {item.title}
                                         </Text>
@@ -391,7 +429,7 @@ export default function Home() {
                                 <TouchableOpacity
                                     activeOpacity={0.85}
                                     style={{
-                                        flex: 1,
+                                        width: (SCREEN_WIDTH - 44) / 2,
                                         backgroundColor: C.surface,
                                         borderRadius: 18,
                                         overflow: 'hidden',
@@ -462,9 +500,14 @@ export default function Home() {
 
                                     {/* Card body */}
                                     <View style={{ padding: 10 }}>
-                                        <Text style={{ color: C.success, fontSize: 14, fontWeight: '800', marginBottom: 2 }}>
-                                            {formatPrice(item.price)}
-                                        </Text>
+                                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                            <Text style={{ color: C.success, fontSize: 14, fontWeight: '800', marginBottom: 2 }}>
+                                                {formatPrice(item.price)}
+                                            </Text>
+                                            <Text style={{ backgroundColor: '#6EE7B7', padding: 5, borderRadius: 5, fontSize: 12, marginBottom: 10 }}>
+                                                {item.type}
+                                            </Text>
+                                        </View>
                                         <Text numberOfLines={1} style={{ color: C.textPrimary, fontSize: 13, fontWeight: '700', marginBottom: 4 }}>
                                             {item.title}
                                         </Text>
