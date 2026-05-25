@@ -1,14 +1,28 @@
-import React, { useState } from 'react'
+import { fetchProperty } from '@/hooks/property'
+import { createClerkSupabaseClient } from '@/lib/supabase'
+import { useProductStore } from '@/store/productStore'
+import { useUserStore } from '@/store/userStore'
+import { useAuth } from '@clerk/expo'
+import * as ImagePicker from 'expo-image-picker'
+import { useFocusEffect } from 'expo-router'
+import React, { useCallback, useState } from 'react'
 import {
+    ActivityIndicator,
+    Alert,
+    Dimensions,
+    Image,
     KeyboardAvoidingView,
     Platform,
     ScrollView,
     Text,
     TextInput,
     TouchableOpacity,
-    View
+    View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window')
+const CARD_WIDTH = (SCREEN_WIDTH - 44) / 2
 
 const C = {
     bg: '#F5F6FA',
@@ -20,238 +34,538 @@ const C = {
     accentText: '#1D4ED8',
     success: '#059669',
     danger: '#DC2626',
+    dangerLight: '#FEF2F2',
     textPrimary: '#0F172A',
     textSecondary: '#64748B',
     textMuted: '#94A3B8',
     white: '#FFFFFF',
 }
 
-const PROPERTY_TYPES = [
-    'Apartment',
-    'Villa',
-    'Plot',
-    'Commercial',
-    'Studio',
-]
+const PROPERTY_TYPES = ['Apartment', 'Villa', 'Plot', 'Commercial', 'Studio', 'Rent']
+
+type Property = {
+    id: string
+    title: string
+    description: string
+    price: number
+    type: string
+    city: string
+    address: string
+    bedrooms: number
+    bathrooms: number
+    area_sqft: number
+    images: string[]
+}
+
+type FormState = {
+    title: string
+    price: string
+    location: string
+    description: string
+    bedrooms: string
+    bathrooms: string
+    sqft: string
+}
+
+const EMPTY_FORM: FormState = {
+    title: '',
+    price: '',
+    location: '',
+    description: '',
+    bedrooms: '',
+    bathrooms: '',
+    sqft: '',
+}
+
+function Field({
+    label,
+    value,
+    onChangeText,
+    placeholder,
+    numeric,
+    multiline,
+}: {
+    label: string
+    value: string
+    onChangeText: (v: string) => void
+    placeholder?: string
+    numeric?: boolean
+    multiline?: boolean
+}) {
+    return (
+        <View style={{ flex: 1 }}>
+            <Text style={{ marginBottom: 6, color: C.textPrimary, fontWeight: '700', fontSize: 13 }}>
+                {label}
+            </Text>
+            <TextInput
+                value={value}
+                onChangeText={onChangeText}
+                placeholder={placeholder}
+                placeholderTextColor={C.textMuted}
+                keyboardType={numeric ? 'numeric' : 'default'}
+                multiline={multiline}
+                textAlignVertical={multiline ? 'top' : undefined}
+                style={{
+                    backgroundColor: C.surface,
+                    borderRadius: 14,
+                    paddingHorizontal: 14,
+                    paddingTop: multiline ? 12 : 0,
+                    height: multiline ? 110 : 50,
+                    borderWidth: 1,
+                    borderColor: C.border,
+                    color: C.textPrimary,
+                    fontSize: 14,
+                }}
+            />
+        </View>
+    )
+}
 
 export default function Create() {
+    const { isAdmin } = useUserStore()
+    const { userId, getToken } = useAuth()
+    const supabase = createClerkSupabaseClient(getToken)
+
+    // ── Create form state ──────────────────────────────────────────────────
+    const [form, setForm] = useState<FormState>(EMPTY_FORM)
     const [selectedType, setSelectedType] = useState('Apartment')
+    // FIX: Track both the local preview URI and the uploaded public URL separately
+    const [selectedImagePreview, setSelectedImagePreview] = useState<string | null>(null)
+    const [selectedImageUrl, setSelectedImageUrl] = useState<string | null>(null)
+    const [publishing, setPublishing] = useState(false)
+    const [uploadingImage, setUploadingImage] = useState(false)
+    const [editImage, setEditImage] = useState<string | null>(null)
+
+    const setField = (key: keyof FormState) => (val: string) =>
+        setForm((prev) => ({ ...prev, [key]: val }))
+
+    const [loading, setLoading] = useState(true)
+    const [editingId, setEditingId] = useState<string | null>(null)
+    const [editForm, setEditForm] = useState<Partial<FormState & { type: string }>>({})
+    const [editUploadingImage, setEditUploadingImage] = useState(false)
+
+    // FIX: pickImage now only handles picking + uploading. It stores the public URL
+    // in selectedImageUrl so onPublish can use it directly without re-uploading.
+    const pickImage = async () => {
+        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync()
+
+        if (!permission.granted) {
+            Alert.alert(
+                'Permission Required',
+                'Please allow access to your photo library.'
+            )
+            return
+        }
+
+        const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: 'images',
+            allowsEditing: true,
+            aspect: [4, 3],
+            quality: 0.7,
+            base64: true,
+        })
+
+        if (result.canceled || !result.assets?.length) return
+
+        const asset = result.assets[0]
+
+        if (!asset.base64) {
+            Alert.alert('Error', 'Could not read image data.')
+            return
+        }
+
+        // Show local preview immediately
+        setSelectedImagePreview(asset.uri)
+        setSelectedImageUrl(null) // clear any previous upload URL
+        setUploadingImage(true)
+
+        try {
+            const filename = `property_${Date.now()}_${Math.random()
+                .toString(36)
+                .slice(2)}.jpg`
+
+            // FIX: Use the same reliable conversion as file 1
+            const buffer = Uint8Array.from(atob(asset.base64), (c) => c.charCodeAt(0))
+
+            const { error } = await supabase.storage
+                .from('property-images')
+                .upload(filename, buffer, {
+                    contentType: 'image/jpeg',
+                    upsert: false,
+                })
+
+            if (error) {
+                console.log('Upload error:', error)
+                Alert.alert('Upload Failed', error.message)
+                // Clear preview since upload failed
+                setSelectedImagePreview(null)
+                return
+            }
+
+            const { data } = supabase.storage
+                .from('property-images')
+                .getPublicUrl(filename)
+
+            // Store the public URL — onPublish will use this directly
+            setSelectedImageUrl(data.publicUrl)
+        } catch (err) {
+            console.log('Image upload error:', err)
+            Alert.alert('Error', 'Failed to upload image.')
+            setSelectedImagePreview(null)
+        } finally {
+            setUploadingImage(false)
+        }
+    }
+
+    // ── Fetch all properties ───────────────────────────────────────────────
+
+    const properties = useProductStore((state: any) => state.properties ?? [])
+
+    useFocusEffect(
+        useCallback(() => {
+            if (isAdmin) {
+                setLoading(true)
+                fetchProperty()
+                setLoading(false)
+            }
+        }, [])
+    )
+
+    // ── Publish ────────────────────────────────────────────────────────────
+    const onPublish = async () => {
+        if (!form.title.trim() || !form.price || !form.location.trim()) {
+            Alert.alert('Missing fields', 'Please fill in title, price and location.')
+            return
+        }
+
+        // FIX: Warn if image is still uploading
+        if (uploadingImage) {
+            Alert.alert('Please wait', 'Image is still uploading.')
+            return
+        }
+
+        setPublishing(true)
+
+        // FIX: Use the already-uploaded URL directly — no re-upload needed
+        const imageUrl =
+            selectedImageUrl ??
+            'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80'
+
+        const [cityPart = '', ...addrParts] = form.location.split(',').map((s) => s.trim())
+
+        const { error } = await supabase.from('properties').insert({
+            title: form.title,
+            description: form.description,
+            price: Number(form.price) || 0,
+            type: selectedType,
+            city: cityPart,
+            address: addrParts.join(', ') || cityPart,
+            bedrooms: Number(form.bedrooms) || 0,
+            bathrooms: Number(form.bathrooms) || 0,
+            area_sqft: Number(form.sqft) || 0,
+            images: [imageUrl],
+        })
+
+        setPublishing(false)
+        if (error) {
+            Alert.alert('Error', error.message)
+        } else {
+            setForm(EMPTY_FORM)
+            setSelectedType('Apartment')
+            setSelectedImagePreview(null)
+            setSelectedImageUrl(null)
+            fetchProperty()
+            Alert.alert('Success', 'Property published successfully!')
+        }
+    }
+
+
+    // ── Start editing ──────────────────────────────────────────────────────
+    const startEdit = (p: Property) => {
+        setEditingId(p.id)
+
+        setEditImage(
+            p.images && p.images.length > 0
+                ? p.images[0]
+                : null
+        )
+
+        setEditForm({
+            title: p.title,
+            price: String(p.price),
+            location: [p.city, p.address].filter(Boolean).join(', '),
+            description: p.description,
+            bedrooms: String(p.bedrooms),
+            bathrooms: String(p.bathrooms),
+            sqft: String(p.area_sqft),
+            type: p.type,
+        })
+    }
+
+    const setEditField = (key: string) => (val: string) =>
+        setEditForm((prev) => ({ ...prev, [key]: val }))
+
+    // ── Save edit ──────────────────────────────────────────────────────────
+    const saveEdit = async (id: string) => {
+        // FIX: Block save while image is still uploading
+        if (editUploadingImage) {
+            Alert.alert('Please wait', 'Image is still uploading.')
+            return
+        }
+
+        const [cityPart = '', ...addrParts] = (editForm.location ?? '').split(',').map((s) => s.trim())
+
+        // FIX: Include images so the newly uploaded image is actually saved to DB
+        const updatePayload: Record<string, any> = {
+            title: editForm.title,
+            description: editForm.description,
+            price: Number(editForm.price) || 0,
+            type: editForm.type,
+            city: cityPart,
+            address: addrParts.join(', ') || cityPart,
+            bedrooms: Number(editForm.bedrooms) || 0,
+            bathrooms: Number(editForm.bathrooms) || 0,
+            area_sqft: Number(editForm.sqft) || 0,
+        }
+
+        if (editImage) {
+            updatePayload.images = [editImage]
+        }
+
+        const { error } = await supabase
+            .from('properties')
+            .update(updatePayload)
+            .eq('id', id)
+
+        if (error) {
+            Alert.alert('Error', error.message)
+        } else {
+            setEditingId(null)
+            fetchProperty()
+        }
+    }
+
+    // ── Delete ─────────────────────────────────────────────────────────────
+    const deleteProperty = (id: string) => {
+        Alert.alert('Delete property', 'Are you sure you want to remove this listing?', [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Delete',
+                style: 'destructive',
+                onPress: async () => {
+                    const { error } = await supabase.from('properties').delete().eq('id', id)
+                    if (error) Alert.alert('Error', error.message)
+                    else {
+                        if (editingId === id) setEditingId(null)
+                        fetchProperty()
+                    }
+                },
+            },
+        ])
+    }
+
+    // ── Menu Options ───────────────────────────────────────────────────────
+    const showPropertyMenu = (p: Property) => {
+        Alert.alert(
+            p.title,
+            'Manage this listing',
+            [
+                {
+                    text: 'Cancel',
+                    style: 'cancel',
+                },
+                {
+                    text: 'Edit Listing',
+                    onPress: () => startEdit(p),
+                },
+                {
+                    text: 'Delete Listing',
+                    style: 'destructive',
+                    onPress: () => deleteProperty(p.id),
+                },
+            ],
+            { cancelable: true }
+        )
+    }
+
+    // ── Not admin ──────────────────────────────────────────────────────────
+    if (!isAdmin) {
+        return (
+            <SafeAreaView style={{ flex: 1, backgroundColor: C.bg, justifyContent: 'center', alignItems: 'center' }}>
+                <Text style={{ fontSize: 16, color: C.textSecondary }}>
+                    You are not authorized to manage listings.
+                </Text>
+            </SafeAreaView>
+        )
+    }
 
     return (
-        <SafeAreaView
-            style={{
-                flex: 1,
-                backgroundColor: C.bg,
-            }}
-        >
-            <KeyboardAvoidingView
-                style={{ flex: 1 }}
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            >
-                <ScrollView
-                    showsVerticalScrollIndicator={false}
-                    contentContainerStyle={{
-                        paddingBottom: 40,
-                    }}
-                >
-                    {/* Header */}
-                    <View
-                        style={{
-                            paddingHorizontal: 20,
-                            paddingTop: 12,
-                            paddingBottom: 24,
-                        }}
-                    >
-                        <Text
-                            style={{
-                                fontSize: 28,
-                                fontWeight: '800',
-                                color: C.textPrimary,
-                            }}
-                        >
-                            List Your Property
-                        </Text>
+        <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
+            <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 60 }}>
 
-                        <Text
-                            style={{
-                                color: C.textMuted,
-                                marginTop: 4,
-                                fontSize: 14,
-                                lineHeight: 22,
-                            }}
-                        >
-                            Add your property details and reach buyers faster
+                    {/* ── Header ── */}
+                    <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20 }}>
+                        <Text style={{ fontSize: 26, fontWeight: '800', color: C.textPrimary }}>
+                            Admin Panel
+                        </Text>
+                        <Text style={{ color: C.textMuted, marginTop: 4, fontSize: 13 }}>
+                            Publish and manage property listings
                         </Text>
                     </View>
 
-                    {/* Cover Image */}
-                    <View
-                        style={{
-                            marginHorizontal: 16,
-                            backgroundColor: C.surface,
-                            borderRadius: 24,
-                            padding: 16,
-                            borderWidth: 1,
-                            borderColor: C.border,
-                            marginBottom: 18,
-                        }}
-                    >
-                        <TouchableOpacity
-                            activeOpacity={0.85}
-                            style={{
-                                height: 180,
-                                borderRadius: 20,
-                                backgroundColor: C.surfaceAlt,
-                                justifyContent: 'center',
-                                alignItems: 'center',
-                                borderWidth: 1.5,
-                                borderColor: C.border,
-                                borderStyle: 'dashed',
-                            }}
-                        >
-                            <Text style={{ fontSize: 42 }}>
-                                🏡
+                    {/* ══════════════════════════════════════════
+                        CREATE FORM
+                    ══════════════════════════════════════════ */}
+                    <View style={{
+                        marginHorizontal: 16,
+                        backgroundColor: C.surface,
+                        borderRadius: 20,
+                        padding: 18,
+                        borderWidth: 1,
+                        borderColor: C.border,
+                        marginBottom: 24,
+                        gap: 14,
+                    }}>
+                        <Text style={{ fontSize: 14, fontWeight: '700', color: C.textPrimary }}>
+                            New listing
+                        </Text>
+
+                        {/* Image Uploader */}
+                        <View style={{ marginBottom: 6 }}>
+                            <Text style={{ marginBottom: 8, color: C.textPrimary, fontWeight: '700', fontSize: 13 }}>
+                                Property photo
                             </Text>
 
-                            <Text
-                                style={{
-                                    marginTop: 10,
-                                    fontSize: 16,
-                                    fontWeight: '700',
-                                    color: C.textPrimary,
-                                }}
-                            >
-                                Upload Property Photos
-                            </Text>
-
-                            <Text
-                                style={{
-                                    marginTop: 4,
-                                    fontSize: 12,
-                                    color: C.textMuted,
-                                }}
-                            >
-                                JPG, PNG • Max 10 images
-                            </Text>
-                        </TouchableOpacity>
-                    </View>
-
-                    {/* Form */}
-                    <View
-                        style={{
-                            paddingHorizontal: 16,
-                            gap: 16,
-                        }}
-                    >
-                        {/* Property Title */}
-                        <View>
-                            <Text
-                                style={{
-                                    marginBottom: 8,
-                                    color: C.textPrimary,
-                                    fontWeight: '700',
-                                    fontSize: 14,
-                                }}
-                            >
-                                Property Title
-                            </Text>
-
-                            <TextInput
-                                placeholder="Modern Villa with Garden"
-                                placeholderTextColor={C.textMuted}
-                                style={{
-                                    backgroundColor: C.surface,
-                                    borderRadius: 16,
-                                    paddingHorizontal: 16,
-                                    height: 56,
-                                    borderWidth: 1,
-                                    borderColor: C.border,
-                                    color: C.textPrimary,
-                                    fontSize: 14,
-                                }}
-                            />
+                            {/* FIX: Use selectedImagePreview for display (shows immediately),
+                                and overlay a spinner while uploadingImage is true */}
+                            {selectedImagePreview ? (
+                                <View style={{ position: 'relative', width: '100%', height: 160, borderRadius: 16, overflow: 'hidden' }}>
+                                    <Image
+                                        source={{ uri: selectedImagePreview }}
+                                        style={{ width: '100%', height: '100%' }}
+                                        resizeMode="cover"
+                                    />
+                                    {/* Upload in-progress overlay */}
+                                    {uploadingImage && (
+                                        <View style={{
+                                            ...StyleSheet_absoluteFill,
+                                            backgroundColor: 'rgba(0,0,0,0.45)',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                        }}>
+                                            <ActivityIndicator color={C.white} size="large" />
+                                            <Text style={{ color: C.white, marginTop: 8, fontSize: 12, fontWeight: '600' }}>
+                                                Uploading...
+                                            </Text>
+                                        </View>
+                                    )}
+                                    {/* Show a checkmark once upload succeeds */}
+                                    {!uploadingImage && selectedImageUrl && (
+                                        <View style={{
+                                            position: 'absolute',
+                                            top: 8,
+                                            left: 8,
+                                            backgroundColor: C.success,
+                                            paddingHorizontal: 8,
+                                            paddingVertical: 4,
+                                            borderRadius: 999,
+                                        }}>
+                                            <Text style={{ color: C.white, fontSize: 11, fontWeight: '700' }}>
+                                                ✓ Uploaded
+                                            </Text>
+                                        </View>
+                                    )}
+                                    <TouchableOpacity
+                                        activeOpacity={0.7}
+                                        onPress={() => {
+                                            setSelectedImagePreview(null)
+                                            setSelectedImageUrl(null)
+                                        }}
+                                        style={{
+                                            position: 'absolute',
+                                            top: 8,
+                                            right: 8,
+                                            backgroundColor: 'rgba(15,23,42,0.65)',
+                                            width: 32,
+                                            height: 32,
+                                            borderRadius: 16,
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                        }}
+                                    >
+                                        <Text style={{ color: C.white, fontSize: 14, fontWeight: 'bold' }}>✕</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            ) : (
+                                <TouchableOpacity
+                                    activeOpacity={0.8}
+                                    onPress={pickImage}
+                                    style={{
+                                        height: 120,
+                                        borderRadius: 16,
+                                        backgroundColor: C.surfaceAlt,
+                                        borderWidth: 1.5,
+                                        borderColor: C.border,
+                                        borderStyle: 'dashed',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: 6,
+                                    }}
+                                >
+                                    <Text style={{ fontSize: 28 }}>📸</Text>
+                                    <Text style={{ fontSize: 13, color: C.textSecondary, fontWeight: '700' }}>
+                                        Upload Property Photo
+                                    </Text>
+                                    <Text style={{ fontSize: 11, color: C.textMuted }}>
+                                        PNG, JPG up to 10MB
+                                    </Text>
+                                </TouchableOpacity>
+                            )}
                         </View>
+
+                        {/* Title */}
+                        <Field
+                            label="Property title"
+                            value={form.title}
+                            onChangeText={setField('title')}
+                            placeholder="Modern Villa with Garden"
+                        />
 
                         {/* Price */}
-                        <View>
-                            <Text
-                                style={{
-                                    marginBottom: 8,
-                                    color: C.textPrimary,
-                                    fontWeight: '700',
-                                    fontSize: 14,
-                                }}
-                            >
-                                Price
-                            </Text>
-
-                            <TextInput
-                                placeholder="₹ 45,00,000"
-                                placeholderTextColor={C.textMuted}
-                                keyboardType="numeric"
-                                style={{
-                                    backgroundColor: C.surface,
-                                    borderRadius: 16,
-                                    paddingHorizontal: 16,
-                                    height: 56,
-                                    borderWidth: 1,
-                                    borderColor: C.border,
-                                    color: C.textPrimary,
-                                    fontSize: 14,
-                                }}
-                            />
-                        </View>
+                        <Field
+                            label="Price (₹)"
+                            value={form.price}
+                            onChangeText={setField('price')}
+                            placeholder="4500000"
+                            numeric
+                        />
 
                         {/* Property Type */}
                         <View>
-                            <Text
-                                style={{
-                                    marginBottom: 10,
-                                    color: C.textPrimary,
-                                    fontWeight: '700',
-                                    fontSize: 14,
-                                }}
-                            >
-                                Property Type
+                            <Text style={{ marginBottom: 8, color: C.textPrimary, fontWeight: '700', fontSize: 13 }}>
+                                Property type
                             </Text>
-
-                            <ScrollView
-                                horizontal
-                                showsHorizontalScrollIndicator={false}
-                                contentContainerStyle={{
-                                    gap: 10,
-                                }}
-                            >
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
                                 {PROPERTY_TYPES.map((item) => (
                                     <TouchableOpacity
                                         key={item}
-                                        activeOpacity={0.85}
+                                        activeOpacity={0.8}
                                         onPress={() => setSelectedType(item)}
                                         style={{
-                                            backgroundColor:
-                                                selectedType === item
-                                                    ? C.accent
-                                                    : C.surface,
-                                            paddingHorizontal: 18,
-                                            paddingVertical: 10,
+                                            backgroundColor: selectedType === item ? C.accent : C.surface,
+                                            paddingHorizontal: 16,
+                                            paddingVertical: 8,
                                             borderRadius: 999,
                                             borderWidth: 1,
-                                            borderColor:
-                                                selectedType === item
-                                                    ? C.accent
-                                                    : C.border,
+                                            borderColor: selectedType === item ? C.accent : C.border,
                                         }}
                                     >
-                                        <Text
-                                            style={{
-                                                color:
-                                                    selectedType === item
-                                                        ? C.white
-                                                        : C.textSecondary,
-                                                fontWeight: '700',
-                                                fontSize: 13,
-                                            }}
-                                        >
+                                        <Text style={{
+                                            color: selectedType === item ? C.white : C.textSecondary,
+                                            fontWeight: '700',
+                                            fontSize: 13,
+                                        }}>
                                             {item}
                                         </Text>
                                     </TouchableOpacity>
@@ -260,148 +574,364 @@ export default function Create() {
                         </View>
 
                         {/* Location */}
-                        <View>
-                            <Text
-                                style={{
-                                    marginBottom: 8,
-                                    color: C.textPrimary,
-                                    fontWeight: '700',
-                                    fontSize: 14,
-                                }}
-                            >
-                                Location
-                            </Text>
+                        <Field
+                            label="Location"
+                            value={form.location}
+                            onChangeText={setField('location')}
+                            placeholder="Udaipur, Rajasthan"
+                        />
 
-                            <TextInput
-                                placeholder="Udaipur, Rajasthan"
-                                placeholderTextColor={C.textMuted}
-                                style={{
-                                    backgroundColor: C.surface,
-                                    borderRadius: 16,
-                                    paddingHorizontal: 16,
-                                    height: 56,
-                                    borderWidth: 1,
-                                    borderColor: C.border,
-                                    color: C.textPrimary,
-                                    fontSize: 14,
-                                }}
-                            />
+                        {/* Beds / Baths / Sqft */}
+                        <View style={{ flexDirection: 'row', gap: 10 }}>
+                            <Field label="Bedrooms" value={form.bedrooms} onChangeText={setField('bedrooms')} placeholder="3" numeric />
+                            <Field label="Bathrooms" value={form.bathrooms} onChangeText={setField('bathrooms')} placeholder="2" numeric />
+                            <Field label="Sqft" value={form.sqft} onChangeText={setField('sqft')} placeholder="1200" numeric />
                         </View>
 
                         {/* Description */}
-                        <View>
-                            <Text
-                                style={{
-                                    marginBottom: 8,
-                                    color: C.textPrimary,
-                                    fontWeight: '700',
-                                    fontSize: 14,
-                                }}
-                            >
-                                Description
-                            </Text>
+                        <Field
+                            label="Description"
+                            value={form.description}
+                            onChangeText={setField('description')}
+                            placeholder="Describe your property..."
+                            multiline
+                        />
 
-                            <TextInput
-                                multiline
-                                placeholder="Describe your property..."
-                                placeholderTextColor={C.textMuted}
-                                textAlignVertical="top"
-                                style={{
-                                    backgroundColor: C.surface,
-                                    borderRadius: 16,
-                                    paddingHorizontal: 16,
-                                    paddingTop: 16,
-                                    height: 130,
-                                    borderWidth: 1,
-                                    borderColor: C.border,
-                                    color: C.textPrimary,
-                                    fontSize: 14,
-                                }}
-                            />
-                        </View>
-
-                        {/* Features */}
-                        <View
-                            style={{
-                                flexDirection: 'row',
-                                gap: 12,
-                            }}
-                        >
-                            {[
-                                {
-                                    label: 'Bedrooms',
-                                    placeholder: '3',
-                                },
-                                {
-                                    label: 'Bathrooms',
-                                    placeholder: '2',
-                                },
-                                {
-                                    label: 'Sqft',
-                                    placeholder: '1200',
-                                },
-                            ].map((item) => (
-                                <View
-                                    key={item.label}
-                                    style={{
-                                        flex: 1,
-                                    }}
-                                >
-                                    <Text
-                                        style={{
-                                            marginBottom: 8,
-                                            color: C.textPrimary,
-                                            fontWeight: '700',
-                                            fontSize: 14,
-                                        }}
-                                    >
-                                        {item.label}
-                                    </Text>
-
-                                    <TextInput
-                                        placeholder={item.placeholder}
-                                        placeholderTextColor={C.textMuted}
-                                        keyboardType="numeric"
-                                        style={{
-                                            backgroundColor: C.surface,
-                                            borderRadius: 16,
-                                            paddingHorizontal: 16,
-                                            height: 56,
-                                            borderWidth: 1,
-                                            borderColor: C.border,
-                                            color: C.textPrimary,
-                                            fontSize: 14,
-                                        }}
-                                    />
-                                </View>
-                            ))}
-                        </View>
-
-                        {/* CTA */}
+                        {/* Submit */}
                         <TouchableOpacity
-                            activeOpacity={0.88}
+                            activeOpacity={0.85}
+                            onPress={onPublish}
+                            disabled={publishing || uploadingImage}
                             style={{
                                 backgroundColor: C.accent,
-                                height: 58,
-                                borderRadius: 18,
+                                height: 52,
+                                borderRadius: 16,
                                 justifyContent: 'center',
                                 alignItems: 'center',
-                                marginTop: 10,
+                                marginTop: 4,
+                                opacity: publishing || uploadingImage ? 0.7 : 1,
                             }}
                         >
-                            <Text
-                                style={{
-                                    color: C.white,
-                                    fontSize: 16,
-                                    fontWeight: '800',
-                                }}
-                            >
-                                Publish Property
-                            </Text>
+                            {publishing ? (
+                                <ActivityIndicator color={C.white} />
+                            ) : (
+                                <Text style={{ color: C.white, fontSize: 15, fontWeight: '800' }}>
+                                    Publish Property
+                                </Text>
+                            )}
                         </TouchableOpacity>
+                    </View>
+
+                    {/* ══════════════════════════════════════════
+                        LISTINGS
+                    ══════════════════════════════════════════ */}
+                    <View style={{ paddingHorizontal: 16 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                            <Text style={{ fontSize: 14, fontWeight: '700', color: C.textPrimary }}>
+                                All listings
+                            </Text>
+                            {!loading && (
+                                <Text style={{ fontSize: 12, color: C.textMuted }}>
+                                    {properties?.length} {properties?.length === 1 ? 'property' : 'properties'}
+                                </Text>
+                            )}
+                        </View>
+
+                        {loading ? (
+                            <ActivityIndicator color={C.accent} style={{ marginTop: 24 }} />
+                        ) : properties.length === 0 ? (
+                            <View style={{
+                                backgroundColor: C.surface,
+                                borderRadius: 16,
+                                padding: 32,
+                                alignItems: 'center',
+                                borderWidth: 1,
+                                borderColor: C.border,
+                            }}>
+                                <Text style={{ fontSize: 32, marginBottom: 8 }}>🏘️</Text>
+                                <Text style={{ color: C.textMuted, fontSize: 14 }}>No listings yet</Text>
+                            </View>
+                        ) : (
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+                                {properties.map((p: any) => (
+                                    <View
+                                        key={p.id}
+                                        style={{
+                                            width: editingId === p.id ? '100%' : CARD_WIDTH,
+                                            backgroundColor: C.surface,
+                                            borderRadius: 18,
+                                            borderWidth: 1,
+                                            borderColor: editingId === p.id ? C.accent : C.border,
+                                            overflow: 'hidden',
+                                        }}
+                                    >
+                                        {/* Property summary row */}
+                                        <View style={{ padding: 12 }}>
+                                            {/* Type badge & 3-dot Menu */}
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                                                <View style={{
+                                                    backgroundColor: C.accentLight,
+                                                    paddingHorizontal: 8,
+                                                    paddingVertical: 3,
+                                                    borderRadius: 999,
+                                                }}>
+                                                    <Text style={{ fontSize: 10, fontWeight: '700', color: C.accentText }}>
+                                                        {p.type}
+                                                    </Text>
+                                                </View>
+
+                                                <TouchableOpacity
+                                                    activeOpacity={0.7}
+                                                    onPress={() => showPropertyMenu(p)}
+                                                    style={{
+                                                        paddingHorizontal: 8,
+                                                        paddingVertical: 2,
+                                                        borderRadius: 6,
+                                                    }}
+                                                >
+                                                    <Text style={{ fontSize: 16, color: C.textSecondary, fontWeight: '900' }}>
+                                                        •••
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            </View>
+
+                                            {/* Image */}
+                                            <Image
+                                                source={{ uri: (p.images && p.images.length > 0) ? p.images[0] : 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80' }}
+                                                style={{
+                                                    width: '100%',
+                                                    height: 105,
+                                                    borderRadius: 12,
+                                                    backgroundColor: C.surfaceAlt,
+                                                    marginBottom: 8,
+                                                }}
+                                                resizeMode="cover"
+                                            />
+
+                                            {/* Name */}
+                                            <Text numberOfLines={1} style={{ fontSize: 14, fontWeight: '700', color: C.textPrimary, marginBottom: 4 }}>
+                                                {p.title}
+                                            </Text>
+
+                                            {/* Address */}
+                                            <Text numberOfLines={1} style={{ fontSize: 12, color: C.textMuted, marginBottom: 6 }}>
+                                                {[p.city, p.address].filter(Boolean).join(', ')}
+                                            </Text>
+
+                                            {/* Price */}
+                                            <Text style={{ fontSize: 14, fontWeight: '800', color: C.accent }}>
+                                                ₹{p.price.toLocaleString('en-IN')}
+                                            </Text>
+                                        </View>
+
+                                        {/* ── Inline edit panel ── */}
+                                        {editingId === p.id && (
+                                            <View style={{
+                                                backgroundColor: C.surfaceAlt,
+                                                borderTopWidth: 1,
+                                                borderTopColor: C.border,
+                                                padding: 16,
+                                                gap: 12,
+                                            }}>
+                                                <Text style={{ fontSize: 13, fontWeight: '700', color: C.textPrimary, marginBottom: 2 }}>
+                                                    Edit listing
+                                                </Text>
+
+                                                <Field label="Title" value={editForm.title ?? ''} onChangeText={setEditField('title')} placeholder="Property title" />
+                                                <Field label="Price (₹)" value={editForm.price ?? ''} onChangeText={setEditField('price')} placeholder="4500000" numeric />
+                                                <View>
+                                                    <Text style={{
+                                                        marginBottom: 8,
+                                                        color: C.textPrimary,
+                                                        fontWeight: '700',
+                                                        fontSize: 13,
+                                                    }}>
+                                                        Property photo
+                                                    </Text>
+
+                                                    <View style={{ position: 'relative' }}>
+                                                        <TouchableOpacity
+                                                            activeOpacity={0.8}
+                                                            onPress={async () => {
+                                                                const result = await ImagePicker.launchImageLibraryAsync({
+                                                                    mediaTypes: ['images'] as any,
+                                                                    allowsEditing: true,
+                                                                    aspect: [4, 3],
+                                                                    quality: 0.8,
+                                                                    base64: true,
+                                                                })
+
+                                                                if (result.canceled || !result.assets?.length) return
+
+                                                                const asset = result.assets[0]
+                                                                if (!asset.base64) return
+
+                                                                // Show local preview immediately while uploading
+                                                                setEditImage(asset.uri)
+                                                                setEditUploadingImage(true)
+
+                                                                try {
+                                                                    const filename = `property_${Date.now()}_${Math.random()
+                                                                        .toString(36)
+                                                                        .slice(2)}.jpg`
+
+                                                                    const buffer = Uint8Array.from(
+                                                                        atob(asset.base64),
+                                                                        (c) => c.charCodeAt(0)
+                                                                    )
+
+                                                                    const { error } = await supabase.storage
+                                                                        .from('property-images')
+                                                                        .upload(filename, buffer, {
+                                                                            contentType: 'image/jpeg',
+                                                                            upsert: false,
+                                                                        })
+
+                                                                    if (error) {
+                                                                        Alert.alert('Upload Failed', error.message)
+                                                                        return
+                                                                    }
+
+                                                                    const { data } = supabase.storage
+                                                                        .from('property-images')
+                                                                        .getPublicUrl(filename)
+
+                                                                    // Store public URL — saveEdit will use this
+                                                                    setEditImage(data.publicUrl)
+                                                                } catch (err) {
+                                                                    console.log('Edit image upload error:', err)
+                                                                    Alert.alert('Error', 'Failed to upload image.')
+                                                                } finally {
+                                                                    setEditUploadingImage(false)
+                                                                }
+                                                            }}
+                                                        >
+                                                            <Image
+                                                                source={{
+                                                                    uri: editImage || p.images?.[0],
+                                                                }}
+                                                                style={{
+                                                                    width: '100%',
+                                                                    height: 180,
+                                                                    borderRadius: 14,
+                                                                    backgroundColor: C.surface,
+                                                                }}
+                                                                resizeMode="cover"
+                                                            />
+                                                        </TouchableOpacity>
+                                                        {editUploadingImage && (
+                                                            <View style={{
+                                                                position: 'absolute',
+                                                                top: 0, left: 0, right: 0, bottom: 0,
+                                                                backgroundColor: 'rgba(0,0,0,0.45)',
+                                                                borderRadius: 14,
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                            }}>
+                                                                <ActivityIndicator color={C.white} size="large" />
+                                                                <Text style={{ color: C.white, marginTop: 8, fontSize: 12, fontWeight: '600' }}>
+                                                                    Uploading...
+                                                                </Text>
+                                                            </View>
+                                                        )}
+                                                    </View>
+                                                </View>
+
+                                                {/* Type pills for edit */}
+                                                <View>
+                                                    <Text style={{ marginBottom: 8, color: C.textPrimary, fontWeight: '700', fontSize: 13 }}>
+                                                        Property type
+                                                    </Text>
+                                                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                                                        {PROPERTY_TYPES.map((item) => (
+                                                            <TouchableOpacity
+                                                                key={item}
+                                                                activeOpacity={0.8}
+                                                                onPress={() => setEditForm((prev) => ({ ...prev, type: item }))}
+                                                                style={{
+                                                                    backgroundColor: editForm.type === item ? C.accent : C.surface,
+                                                                    paddingHorizontal: 14,
+                                                                    paddingVertical: 7,
+                                                                    borderRadius: 999,
+                                                                    borderWidth: 1,
+                                                                    borderColor: editForm.type === item ? C.accent : C.border,
+                                                                }}
+                                                            >
+                                                                <Text style={{
+                                                                    color: editForm.type === item ? C.white : C.textSecondary,
+                                                                    fontWeight: '700',
+                                                                    fontSize: 12,
+                                                                }}>
+                                                                    {item}
+                                                                </Text>
+                                                            </TouchableOpacity>
+                                                        ))}
+                                                    </ScrollView>
+                                                </View>
+
+                                                <Field label="Location" value={editForm.location ?? ''} onChangeText={setEditField('location')} placeholder="City, Address" />
+
+                                                <View style={{ flexDirection: 'row', gap: 10 }}>
+                                                    <Field label="Bedrooms" value={editForm.bedrooms ?? ''} onChangeText={setEditField('bedrooms')} placeholder="3" numeric />
+                                                    <Field label="Bathrooms" value={editForm.bathrooms ?? ''} onChangeText={setEditField('bathrooms')} placeholder="2" numeric />
+                                                    <Field label="Sqft" value={editForm.sqft ?? ''} onChangeText={setEditField('sqft')} placeholder="1200" numeric />
+                                                </View>
+
+                                                <Field label="Description" value={editForm.description ?? ''} onChangeText={setEditField('description')} placeholder="Property description..." multiline />
+
+                                                {/* Save / Cancel */}
+                                                <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+                                                    <TouchableOpacity
+                                                        activeOpacity={0.8}
+                                                        onPress={() => setEditingId(null)}
+                                                        style={{
+                                                            flex: 1,
+                                                            backgroundColor: C.surfaceAlt,
+                                                            height: 48,
+                                                            borderRadius: 14,
+                                                            justifyContent: 'center',
+                                                            alignItems: 'center',
+                                                            borderWidth: 1,
+                                                            borderColor: C.border,
+                                                        }}
+                                                    >
+                                                        <Text style={{ color: C.textSecondary, fontSize: 14, fontWeight: '700' }}>
+                                                            Cancel
+                                                        </Text>
+                                                    </TouchableOpacity>
+
+                                                    <TouchableOpacity
+                                                        activeOpacity={0.85}
+                                                        onPress={() => saveEdit(p.id)}
+                                                        style={{
+                                                            flex: 2,
+                                                            backgroundColor: C.accent,
+                                                            height: 48,
+                                                            borderRadius: 14,
+                                                            justifyContent: 'center',
+                                                            alignItems: 'center',
+                                                        }}
+                                                    >
+                                                        <Text style={{ color: C.white, fontSize: 14, fontWeight: '800' }}>
+                                                            Save Changes
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                </View>
+                                            </View>
+                                        )}
+                                    </View>
+                                ))}
+                            </View>
+                        )}
                     </View>
                 </ScrollView>
             </KeyboardAvoidingView>
-        </SafeAreaView >
+        </SafeAreaView>
     )
+}
+
+// Helper used for the upload overlay (avoids importing StyleSheet just for this)
+const StyleSheet_absoluteFill = {
+    position: 'absolute' as const,
+    top: 0, left: 0, right: 0, bottom: 0,
 }

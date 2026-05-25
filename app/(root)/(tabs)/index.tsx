@@ -209,7 +209,7 @@ export default function Home() {
                 >
                     {propertyTypes.map((cat: any) => (
                         <TouchableOpacity
-                            key={cat.id}
+                            key={cat}
                             onPress={() => setActiveFilter(cat)}
                             activeOpacity={0.8}
                             style={{
