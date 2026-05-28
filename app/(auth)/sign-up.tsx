@@ -281,7 +281,7 @@ const SignUp = () => {
                                             placeholder="Confirm Password"
                                             placeholderTextColor="#9CA3AF"
                                             autoCapitalize='none'
-                                            secureTextEntry
+                                            secureTextEntr
                                         />
 
                                     </>
