@@ -1,4 +1,4 @@
-import { useUserStore } from "@/store/userStore";
+import { useUserStore } from "../store/userStore";
 import { useUser } from "@clerk/expo";
 import { useEffect } from "react";
 import useSupabase from "./useSupabse";

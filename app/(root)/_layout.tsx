@@ -1,4 +1,4 @@
-import { useUserSync } from "@/hooks/useUserSync";
+import { useUserSync } from "../../hooks/useUserSync";
 import { useAuth } from "@clerk/expo";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Redirect, Slot } from "expo-router";

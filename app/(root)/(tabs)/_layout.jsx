@@ -1,4 +1,4 @@
-import { useUserStore } from '@/store/userStore';
+import { useUserStore } from '../../../store/userStore';
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import { Icon, Label, NativeTabs } from 'expo-router/unstable-native-tabs';
@@ -88,4 +88,3 @@ function IosTabLayout() {
 export default function TabLayout() {
     return Platform.OS === "android" ? <AndroidTabLayout /> : <IosTabLayout />
 }
-

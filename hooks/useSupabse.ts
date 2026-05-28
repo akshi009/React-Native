@@ -1,5 +1,5 @@
 
-import { createClerkSupabaseClient } from "@/lib/supabase";
+import { createClerkSupabaseClient } from "../lib/supabase";
 import { useAuth } from "@clerk/expo";
 import { useMemo } from "react";
 export default function useSupabase() {

@@ -1,5 +1,5 @@
-import { fetchSavedIds, toggleSave } from '@/hooks/save_property'
-import { createClerkSupabaseClient } from '@/lib/supabase'
+import { fetchSavedIds, toggleSave } from '../../../hooks/save_property'
+import { createClerkSupabaseClient } from '../../../lib/supabase'
 import { useAuth, useUser } from '@clerk/expo'
 import { useQuery } from '@tanstack/react-query'
 import { router, useFocusEffect } from 'expo-router'

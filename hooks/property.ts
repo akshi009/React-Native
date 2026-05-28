@@ -1,5 +1,5 @@
-import { supabase } from "@/lib/supabase";
-import { useProductStore } from "@/store/productStore";
+import { supabase } from "../lib/supabase";
+import { useProductStore } from "../store/productStore";
 
 export const fetchProperty = async () => {
 

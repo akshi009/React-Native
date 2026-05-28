@@ -22,7 +22,8 @@ const SignUp = () => {
         Keyboard.dismiss()
         try {
             const { error } = await signUp?.password({
-                firstName: data.fullName,
+                firstName: data.full_name,
+                lastName: data.last_name,
                 emailAddress: data.email,
                 password: data.password,
             })
