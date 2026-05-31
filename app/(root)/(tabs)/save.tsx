@@ -2,7 +2,7 @@ import { fetchSavedIds, toggleSave } from '../../../hooks/save_property'
 import { createClerkSupabaseClient } from '../../../lib/supabase'
 import { useAuth, useUser } from '@clerk/expo'
 import { useQuery } from '@tanstack/react-query'
-import { useFocusEffect } from 'expo-router'
+import { router, useFocusEffect } from 'expo-router'
 import React, { useCallback, useMemo } from 'react'
 import {
     Dimensions,
@@ -14,6 +14,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 const { width: SCREEN_WIDTH } = Dimensions.get('window')
+const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80'
 
 const C = {
     bg: '#F5F6FA',
@@ -40,13 +41,18 @@ const formatPrice = (price: number): string => {
     return `₹${price}`
 }
 
+const openProperty = (id?: string) => {
+    if (!id) return
+    router.push({ pathname: '/property/[id]', params: { id } })
+}
+
 const Save = () => {
     const { user } = useUser()
     const { getToken } = useAuth()
 
     const supabase = useMemo(
         () => createClerkSupabaseClient(getToken),
-        []
+        [getToken]
     )
 
     const {
@@ -62,7 +68,7 @@ const Save = () => {
     useFocusEffect(
         useCallback(() => {
             refetch()
-        }, [])
+        }, [refetch])
     )
 
 
@@ -157,6 +163,7 @@ const Save = () => {
 
                     return (
                         <TouchableOpacity
+                            onPress={() => openProperty(property?.id)}
                             activeOpacity={0.85}
                             style={{
                                 width: (SCREEN_WIDTH - 44) / 2,
@@ -168,7 +175,7 @@ const Save = () => {
                             }}
                         >
                             <Image
-                                source={{ uri: property?.images?.[0] }}
+                                source={{ uri: property?.images?.[0] || FALLBACK_IMAGE }}
                                 style={{
                                     width: '100%',
                                     height: 115,

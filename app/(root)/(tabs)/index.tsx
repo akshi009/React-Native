@@ -1,5 +1,3 @@
-import { fetchSavedIds, toggleSave } from '../../../hooks/save_property'
-import { createClerkSupabaseClient } from '../../../lib/supabase'
 import { useAuth, useUser } from '@clerk/expo'
 import { useQuery } from '@tanstack/react-query'
 import { router, useFocusEffect } from 'expo-router'
@@ -18,16 +16,23 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { fetchProperty } from '../../../hooks/property'
+import { fetchSavedIds, toggleSave } from '../../../hooks/save_property'
+import { createClerkSupabaseClient } from '../../../lib/supabase'
 import { useProductStore } from '../../../store/productStore'
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window')
 const CARD_WIDTH = SCREEN_WIDTH - 64
+const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80'
 
 const formatPrice = (price: number): string => {
     if (price >= 10000000) return `₹${(price / 10000000).toFixed(1).replace(/\.0$/, '')} Cr`
     if (price >= 100000) return `₹${(price / 100000).toFixed(1).replace(/\.0$/, '')} Lac`
     if (price >= 1000) return `₹${(price / 1000).toFixed(1).replace(/\.0$/, '')}K`
     return `₹${price}`
+}
+
+const openProperty = (id: string) => {
+    router.push({ pathname: '/property/[id]', params: { id } })
 }
 
 // ── Light theme tokens ──────────────────────────────────────────
@@ -71,7 +76,7 @@ export default function Home() {
     useFocusEffect(
         useCallback(() => {
             refetch()
-        }, [])
+        }, [refetch])
     )
 
     const carouselRef = useRef<ScrollView>(null)
@@ -86,7 +91,7 @@ export default function Home() {
                 item.city?.toLowerCase().includes(search.toLowerCase()) ||
                 item.address?.toLowerCase().includes(search.toLowerCase())
 
-            const matchesType = activeFilter == 'All' || item.type == activeFilter
+            const matchesType = activeFilter === 'All' || item.type === activeFilter
             return matchesSearch && matchesType
         })
     }, [properties, search, activeFilter])
@@ -262,6 +267,7 @@ export default function Home() {
                                 <TouchableOpacity
                                     key={item.id}
                                     activeOpacity={0.9}
+                                    onPress={() => openProperty(item.id)}
                                     style={{
                                         width: CARD_WIDTH,
                                         height: 210,
@@ -272,7 +278,7 @@ export default function Home() {
                                     }}
                                 >
                                     <Image
-                                        source={{ uri: item.images?.[0] }}
+                                        source={{ uri: item.images?.[0] || FALLBACK_IMAGE }}
                                         style={{ width: '100%', height: '100%', position: 'absolute' }}
                                         resizeMode="cover"
                                     />
@@ -427,6 +433,7 @@ export default function Home() {
                             contentContainerStyle={{ gap: 12 }}
                             renderItem={({ item }) => (
                                 <TouchableOpacity
+                                    onPress={() => openProperty(item.id)}
                                     activeOpacity={0.85}
                                     style={{
                                         width: (SCREEN_WIDTH - 44) / 2,
@@ -439,7 +446,7 @@ export default function Home() {
                                 >
                                     {/* Property image */}
                                     <Image
-                                        source={{ uri: item.images?.[0] }}
+                                        source={{ uri: item.images?.[0] || FALLBACK_IMAGE }}
                                         style={{ width: '100%', height: 115, backgroundColor: C.surfaceAlt }}
                                         resizeMode="cover"
                                     />
@@ -504,7 +511,7 @@ export default function Home() {
                                             <Text style={{ color: C.success, fontSize: 14, fontWeight: '800', marginBottom: 2 }}>
                                                 {formatPrice(item.price)}
                                             </Text>
-                                            <Text style={{ backgroundColor: '#6EE7B7', padding: 5, borderRadius: 5, fontSize: 12, marginBottom: 10 }}>
+                                            <Text style={{ backgroundColor: '#6EE7B7', padding: 5, borderRadius: 5, fontSize: 12, marginBottom: 3 }}>
                                                 {item.type}
                                             </Text>
                                         </View>

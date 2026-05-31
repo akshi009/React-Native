@@ -15,4 +15,5 @@ export interface Property {
     is_featured: boolean;
     is_sold: boolean;
     created_at: string;
+    contact_number?: string
 }

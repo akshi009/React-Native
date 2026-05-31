@@ -1,6 +1,3 @@
-import { fetchSavedIds } from '../../../hooks/save_property'
-import { createClerkSupabaseClient } from '../../../lib/supabase'
-import { useUserStore } from '../../../store/userStore'
 import { useAuth, useUser } from '@clerk/expo'
 import { useQuery } from '@tanstack/react-query'
 import { useFocusEffect, useRouter } from 'expo-router'
@@ -13,6 +10,9 @@ import {
     View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { fetchSavedIds } from '../../../hooks/save_property'
+import { createClerkSupabaseClient } from '../../../lib/supabase'
+import { useUserStore } from '../../../store/userStore'
 
 const C = {
     bg: '#F5F6FA',
@@ -40,7 +40,7 @@ const MENU_ITEMS = [
         icon: '🏡',
         title: 'My Listings',
         subtitle: 'Manage your properties',
-        url: '/listings'
+        url: '/(root)/(tabs)/create'
     },
 
 ]

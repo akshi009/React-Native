@@ -1,8 +1,4 @@
-import { fetchProperty } from '../../../hooks/property'
-import { createClerkSupabaseClient } from '../../../lib/supabase'
-import { useProductStore } from '../../../store/productStore'
-import { useUserStore } from '../../../store/userStore'
-import { useAuth } from '@clerk/expo'
+import { useAuth, useUser } from '@clerk/expo'
 import * as ImagePicker from 'expo-image-picker'
 import { useFocusEffect } from 'expo-router'
 import React, { useCallback, useState } from 'react'
@@ -20,6 +16,10 @@ import {
     View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { fetchProperty } from '../../../hooks/property'
+import { createClerkSupabaseClient } from '../../../lib/supabase'
+import { useProductStore } from '../../../store/productStore'
+import { useUserStore } from '../../../store/userStore'
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window')
 const CARD_WIDTH = (SCREEN_WIDTH - 44) / 2
@@ -55,6 +55,7 @@ type Property = {
     bathrooms: number
     area_sqft: number
     images: string[]
+    contact_number?: string
 }
 
 type FormState = {
@@ -65,6 +66,14 @@ type FormState = {
     bedrooms: string
     bathrooms: string
     sqft: string
+    contact_number: string
+}
+
+type SelectedImage = {
+    id: string
+    previewUri: string
+    publicUrl: string | null
+    status: 'uploading' | 'uploaded' | 'failed'
 }
 
 const EMPTY_FORM: FormState = {
@@ -75,6 +84,7 @@ const EMPTY_FORM: FormState = {
     bedrooms: '',
     bathrooms: '',
     sqft: '',
+    contact_number: '',
 }
 
 function Field({
@@ -123,15 +133,14 @@ function Field({
 
 export default function Create() {
     const { isAdmin } = useUserStore()
-    const { userId, getToken } = useAuth()
+    const { user } = useUser()
+    const { getToken } = useAuth()
     const supabase = createClerkSupabaseClient(getToken)
 
     // ── Create form state ──────────────────────────────────────────────────
     const [form, setForm] = useState<FormState>(EMPTY_FORM)
     const [selectedType, setSelectedType] = useState('Apartment')
-    // FIX: Track both the local preview URI and the uploaded public URL separately
-    const [selectedImagePreview, setSelectedImagePreview] = useState<string | null>(null)
-    const [selectedImageUrl, setSelectedImageUrl] = useState<string | null>(null)
+    const [selectedImages, setSelectedImages] = useState<SelectedImage[]>([])
     const [publishing, setPublishing] = useState(false)
     const [uploadingImage, setUploadingImage] = useState(false)
     const [editImage, setEditImage] = useState<string | null>(null)
@@ -144,9 +153,7 @@ export default function Create() {
     const [editForm, setEditForm] = useState<Partial<FormState & { type: string }>>({})
     const [editUploadingImage, setEditUploadingImage] = useState(false)
 
-    // FIX: pickImage now only handles picking + uploading. It stores the public URL
-    // in selectedImageUrl so onPublish can use it directly without re-uploading.
-    const pickImage = async () => {
+    const pickImages = async () => {
         const permission = await ImagePicker.requestMediaLibraryPermissionsAsync()
 
         if (!permission.granted) {
@@ -159,32 +166,37 @@ export default function Create() {
 
         const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: 'images',
-            allowsEditing: true,
-            aspect: [4, 3],
+            allowsMultipleSelection: true,
+            selectionLimit: 10,
             quality: 0.7,
             base64: true,
         })
 
         if (result.canceled || !result.assets?.length) return
 
-        const asset = result.assets[0]
+        const pickedImages = result.assets.map((asset, index) => ({
+            id: `${Date.now()}_${index}_${Math.random().toString(36).slice(2)}`,
+            previewUri: asset.uri,
+            publicUrl: null as string | null,
+            status: 'uploading' as const,
+        }))
 
-        if (!asset.base64) {
-            Alert.alert('Error', 'Could not read image data.')
-            return
-        }
-
-        // Show local preview immediately
-        setSelectedImagePreview(asset.uri)
-        setSelectedImageUrl(null) // clear any previous upload URL
+        setSelectedImages((prev) => [...prev, ...pickedImages])
         setUploadingImage(true)
 
-        try {
-            const filename = `property_${Date.now()}_${Math.random()
-                .toString(36)
-                .slice(2)}.jpg`
+        const uploadSingleImage = async (asset: (typeof result.assets)[number], imageId: string) => {
+            if (!asset.base64) {
+                setSelectedImages((prev) =>
+                    prev.map((item) =>
+                        item.id === imageId
+                            ? { ...item, status: 'failed' }
+                            : item
+                    )
+                )
+                return
+            }
 
-            // FIX: Use the same reliable conversion as file 1
+            const filename = `property_${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`
             const buffer = Uint8Array.from(atob(asset.base64), (c) => c.charCodeAt(0))
 
             const { error } = await supabase.storage
@@ -196,9 +208,13 @@ export default function Create() {
 
             if (error) {
                 console.log('Upload error:', error)
-                Alert.alert('Upload Failed', error.message)
-                // Clear preview since upload failed
-                setSelectedImagePreview(null)
+                setSelectedImages((prev) =>
+                    prev.map((item) =>
+                        item.id === imageId
+                            ? { ...item, status: 'failed' }
+                            : item
+                    )
+                )
                 return
             }
 
@@ -206,14 +222,90 @@ export default function Create() {
                 .from('property-images')
                 .getPublicUrl(filename)
 
-            // Store the public URL — onPublish will use this directly
-            setSelectedImageUrl(data.publicUrl)
+            setSelectedImages((prev) =>
+                prev.map((item) =>
+                    item.id === imageId
+                        ? { ...item, publicUrl: data.publicUrl, status: 'uploaded' }
+                        : item
+                )
+            )
+        }
+
+        try {
+            await Promise.all(
+                result.assets.map((asset, index) => uploadSingleImage(asset, pickedImages[index].id))
+            )
         } catch (err) {
             console.log('Image upload error:', err)
-            Alert.alert('Error', 'Failed to upload image.')
-            setSelectedImagePreview(null)
+            Alert.alert('Error', 'Failed to upload one or more images.')
         } finally {
             setUploadingImage(false)
+        }
+    }
+
+    const removeSelectedImage = (imageId: string) => {
+        setSelectedImages((prev) => prev.filter((item) => item.id !== imageId))
+    }
+
+    const retrySelectedImage = async (imageId: string) => {
+        const image = selectedImages.find((item) => item.id === imageId)
+        if (!image) return
+
+        setSelectedImages((prev) =>
+            prev.map((item) =>
+                item.id === imageId
+                    ? { ...item, status: 'uploading' }
+                    : item
+            )
+        )
+
+        try {
+            const response = await fetch(image.previewUri)
+            const blob = await response.blob()
+            const arrayBuffer = await blob.arrayBuffer()
+            const buffer = new Uint8Array(arrayBuffer)
+            const filename = `property_${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`
+
+            const { error } = await supabase.storage
+                .from('property-images')
+                .upload(filename, buffer, {
+                    contentType: 'image/jpeg',
+                    upsert: false,
+                })
+
+            if (error) {
+                setSelectedImages((prev) =>
+                    prev.map((item) =>
+                        item.id === imageId
+                            ? { ...item, status: 'failed' }
+                            : item
+                    )
+                )
+                Alert.alert('Upload Failed', error.message)
+                return
+            }
+
+            const { data } = supabase.storage
+                .from('property-images')
+                .getPublicUrl(filename)
+
+            setSelectedImages((prev) =>
+                prev.map((item) =>
+                    item.id === imageId
+                        ? { ...item, publicUrl: data.publicUrl, status: 'uploaded' }
+                        : item
+                )
+            )
+        } catch (err) {
+            console.log('Retry upload error:', err)
+            setSelectedImages((prev) =>
+                prev.map((item) =>
+                    item.id === imageId
+                        ? { ...item, status: 'failed' }
+                        : item
+                )
+            )
+            return
         }
     }
 
@@ -228,7 +320,7 @@ export default function Create() {
                 fetchProperty()
                 setLoading(false)
             }
-        }, [])
+        }, [isAdmin])
     )
 
     // ── Publish ────────────────────────────────────────────────────────────
@@ -238,18 +330,23 @@ export default function Create() {
             return
         }
 
-        // FIX: Warn if image is still uploading
-        if (uploadingImage) {
+        if (uploadingImage || selectedImages.some((item) => item.status === 'uploading')) {
             Alert.alert('Please wait', 'Image is still uploading.')
             return
         }
 
         setPublishing(true)
 
-        // FIX: Use the already-uploaded URL directly — no re-upload needed
-        const imageUrl =
-            selectedImageUrl ??
-            'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80'
+        const imageUrls = selectedImages
+            .filter((item) => item.status === 'uploaded' && item.publicUrl)
+            .map((item) => item.publicUrl as string)
+
+        const finalImages =
+            imageUrls.length > 0
+                ? imageUrls
+                : [
+                    'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80'
+                ]
 
         const [cityPart = '', ...addrParts] = form.location.split(',').map((s) => s.trim())
 
@@ -263,7 +360,8 @@ export default function Create() {
             bedrooms: Number(form.bedrooms) || 0,
             bathrooms: Number(form.bathrooms) || 0,
             area_sqft: Number(form.sqft) || 0,
-            images: [imageUrl],
+            images: finalImages,
+            contact_number: form.contact_number
         })
 
         setPublishing(false)
@@ -272,8 +370,7 @@ export default function Create() {
         } else {
             setForm(EMPTY_FORM)
             setSelectedType('Apartment')
-            setSelectedImagePreview(null)
-            setSelectedImageUrl(null)
+            setSelectedImages([])
             fetchProperty()
             Alert.alert('Success', 'Property published successfully!')
         }
@@ -434,93 +531,136 @@ export default function Create() {
                         {/* Image Uploader */}
                         <View style={{ marginBottom: 6 }}>
                             <Text style={{ marginBottom: 8, color: C.textPrimary, fontWeight: '700', fontSize: 13 }}>
-                                Property photo
+                                Property photos
                             </Text>
 
-                            {/* FIX: Use selectedImagePreview for display (shows immediately),
-                                and overlay a spinner while uploadingImage is true */}
-                            {selectedImagePreview ? (
-                                <View style={{ position: 'relative', width: '100%', height: 160, borderRadius: 16, overflow: 'hidden' }}>
-                                    <Image
-                                        source={{ uri: selectedImagePreview }}
-                                        style={{ width: '100%', height: '100%' }}
-                                        resizeMode="cover"
-                                    />
-                                    {/* Upload in-progress overlay */}
-                                    {uploadingImage && (
-                                        <View style={{
-                                            ...StyleSheet_absoluteFill,
-                                            backgroundColor: 'rgba(0,0,0,0.45)',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                        }}>
-                                            <ActivityIndicator color={C.white} size="large" />
-                                            <Text style={{ color: C.white, marginTop: 8, fontSize: 12, fontWeight: '600' }}>
-                                                Uploading...
-                                            </Text>
+                            <TouchableOpacity
+                                activeOpacity={0.8}
+                                onPress={pickImages}
+                                disabled={uploadingImage}
+                                style={{
+                                    height: 120,
+                                    borderRadius: 16,
+                                    backgroundColor: C.surfaceAlt,
+                                    borderWidth: 1.5,
+                                    borderColor: C.border,
+                                    borderStyle: 'dashed',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: 6,
+                                    opacity: uploadingImage ? 0.7 : 1,
+                                }}
+                            >
+                                <Text style={{ fontSize: 28 }}>📸</Text>
+                                <Text style={{ fontSize: 13, color: C.textSecondary, fontWeight: '700' }}>
+                                    Add Property Photos
+                                </Text>
+                                <Text style={{ fontSize: 11, color: C.textMuted }}>
+                                    Select up to 10 PNG/JPG images
+                                </Text>
+                            </TouchableOpacity>
+
+                            {selectedImages.length > 0 && (
+                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
+                                    {selectedImages.map((image) => (
+                                        <View
+                                            key={image.id}
+                                            style={{
+                                                width: '48%',
+                                                height: 150,
+                                                borderRadius: 16,
+                                                overflow: 'hidden',
+                                                position: 'relative',
+                                                backgroundColor: C.surfaceAlt,
+                                            }}
+                                        >
+                                            <Image
+                                                source={{ uri: image.previewUri }}
+                                                style={{ width: '100%', height: '100%' }}
+                                                resizeMode="cover"
+                                            />
+                                            {image.status === 'uploading' && (
+                                                <View style={{
+                                                    ...StyleSheet_absoluteFill,
+                                                    backgroundColor: 'rgba(0,0,0,0.45)',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                }}>
+                                                    <ActivityIndicator color={C.white} size="small" />
+                                                    <Text style={{ color: C.white, marginTop: 6, fontSize: 11, fontWeight: '600' }}>
+                                                        Uploading...
+                                                    </Text>
+                                                </View>
+                                            )}
+                                            {image.status === 'uploaded' && (
+                                                <View style={{
+                                                    position: 'absolute',
+                                                    top: 8,
+                                                    left: 8,
+                                                    backgroundColor: C.success,
+                                                    paddingHorizontal: 8,
+                                                    paddingVertical: 4,
+                                                    borderRadius: 999,
+                                                }}>
+                                                    <Text style={{ color: C.white, fontSize: 11, fontWeight: '700' }}>
+                                                        ✓ Uploaded
+                                                    </Text>
+                                                </View>
+                                            )}
+                                            {image.status === 'failed' && (
+                                                <View style={{
+                                                    position: 'absolute',
+                                                    top: 8,
+                                                    left: 8,
+                                                    backgroundColor: C.danger,
+                                                    paddingHorizontal: 8,
+                                                    paddingVertical: 4,
+                                                    borderRadius: 999,
+                                                }}>
+                                                    <Text style={{ color: C.white, fontSize: 11, fontWeight: '700' }}>
+                                                        Failed
+                                                    </Text>
+                                                </View>
+                                            )}
+                                            <TouchableOpacity
+                                                activeOpacity={0.7}
+                                                onPress={() => removeSelectedImage(image.id)}
+                                                style={{
+                                                    position: 'absolute',
+                                                    top: 8,
+                                                    right: 8,
+                                                    backgroundColor: 'rgba(15,23,42,0.65)',
+                                                    width: 32,
+                                                    height: 32,
+                                                    borderRadius: 16,
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                }}
+                                            >
+                                                <Text style={{ color: C.white, fontSize: 14, fontWeight: 'bold' }}>✕</Text>
+                                            </TouchableOpacity>
+                                            {image.status === 'failed' && (
+                                                <TouchableOpacity
+                                                    activeOpacity={0.75}
+                                                    onPress={() => retrySelectedImage(image.id)}
+                                                    style={{
+                                                        position: 'absolute',
+                                                        bottom: 8,
+                                                        left: 8,
+                                                        backgroundColor: 'rgba(37,99,235,0.9)',
+                                                        paddingHorizontal: 10,
+                                                        paddingVertical: 5,
+                                                        borderRadius: 999,
+                                                    }}
+                                                >
+                                                    <Text style={{ color: C.white, fontSize: 11, fontWeight: '700' }}>
+                                                        Retry
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            )}
                                         </View>
-                                    )}
-                                    {/* Show a checkmark once upload succeeds */}
-                                    {!uploadingImage && selectedImageUrl && (
-                                        <View style={{
-                                            position: 'absolute',
-                                            top: 8,
-                                            left: 8,
-                                            backgroundColor: C.success,
-                                            paddingHorizontal: 8,
-                                            paddingVertical: 4,
-                                            borderRadius: 999,
-                                        }}>
-                                            <Text style={{ color: C.white, fontSize: 11, fontWeight: '700' }}>
-                                                ✓ Uploaded
-                                            </Text>
-                                        </View>
-                                    )}
-                                    <TouchableOpacity
-                                        activeOpacity={0.7}
-                                        onPress={() => {
-                                            setSelectedImagePreview(null)
-                                            setSelectedImageUrl(null)
-                                        }}
-                                        style={{
-                                            position: 'absolute',
-                                            top: 8,
-                                            right: 8,
-                                            backgroundColor: 'rgba(15,23,42,0.65)',
-                                            width: 32,
-                                            height: 32,
-                                            borderRadius: 16,
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                        }}
-                                    >
-                                        <Text style={{ color: C.white, fontSize: 14, fontWeight: 'bold' }}>✕</Text>
-                                    </TouchableOpacity>
+                                    ))}
                                 </View>
-                            ) : (
-                                <TouchableOpacity
-                                    activeOpacity={0.8}
-                                    onPress={pickImage}
-                                    style={{
-                                        height: 120,
-                                        borderRadius: 16,
-                                        backgroundColor: C.surfaceAlt,
-                                        borderWidth: 1.5,
-                                        borderColor: C.border,
-                                        borderStyle: 'dashed',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        gap: 6,
-                                    }}
-                                >
-                                    <Text style={{ fontSize: 28 }}>📸</Text>
-                                    <Text style={{ fontSize: 13, color: C.textSecondary, fontWeight: '700' }}>
-                                        Upload Property Photo
-                                    </Text>
-                                    <Text style={{ fontSize: 11, color: C.textMuted }}>
-                                        PNG, JPG up to 10MB
-                                    </Text>
-                                </TouchableOpacity>
                             )}
                         </View>
 
@@ -595,6 +735,14 @@ export default function Create() {
                             onChangeText={setField('description')}
                             placeholder="Describe your property..."
                             multiline
+                        />
+
+                        <Field
+                            label="Owner Contact Number"
+                            value={form.contact_number}
+                            onChangeText={setField('contact_number')}
+                            placeholder="0987654321"
+                            numeric
                         />
 
                         {/* Submit */}
