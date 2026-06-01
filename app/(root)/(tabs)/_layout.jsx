@@ -1,8 +1,8 @@
-import { useUserStore } from '../../../store/userStore';
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import { Icon, Label, NativeTabs } from 'expo-router/unstable-native-tabs';
 import { Platform } from 'react-native';
+import { useUserStore } from '../../../store/userStore';
 
 function AndroidTabLayout() {
     const isAdmin = useUserStore(state => state.isAdmin)
@@ -61,10 +61,10 @@ function IosTabLayout() {
                 <Label>Home</Label>
                 <Icon sf="house.fill" drawable="custom_android_drawable" />
             </NativeTabs.Trigger>
-            <NativeTabs.Trigger name="search">
+            {/* <NativeTabs.Trigger name="search">
                 <Icon sf="magnifyingglass" drawable="custom_settings_drawable" />
                 <Label>Search</Label>
-            </NativeTabs.Trigger>
+            </NativeTabs.Trigger> */}
 
             {isAdmin &&
                 <NativeTabs.Trigger name="create">

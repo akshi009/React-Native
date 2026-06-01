@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { fetchSavedIds } from '../../../hooks/save_property'
 import { createClerkSupabaseClient } from '../../../lib/supabase'
+import { useProductStore } from '../../../store/productStore'
 import { useUserStore } from '../../../store/userStore'
 
 const C = {
@@ -58,6 +59,9 @@ const Profile = () => {
 
     const initials =
         `${user?.firstName?.[0] ?? ''}${user?.lastName?.[0] ?? ''}`.toUpperCase()
+
+    const properties = useProductStore((state: any) => state.properties ?? [])
+    const owner_property = properties?.filter((p: any) => p.owner_email === user?.emailAddresses?.[0]?.emailAddress)
 
     return (
         <SafeAreaView
@@ -206,7 +210,7 @@ const Profile = () => {
                     >
                         {[
                             { label: 'Saved', value: saved?.length || 0 },
-                            { label: 'Listed', value: '4' },
+                            { label: 'Listed', value: owner_property?.length || 0 },
                         ].map((item, index) => (
                             <View
                                 key={item.label}

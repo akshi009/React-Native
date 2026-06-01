@@ -56,6 +56,9 @@ type Property = {
     area_sqft: number
     images: string[]
     contact_number?: string
+    owner_email?: string
+    is_sold?: boolean
+
 }
 
 type FormState = {
@@ -67,6 +70,7 @@ type FormState = {
     bathrooms: string
     sqft: string
     contact_number: string
+    owner_email: string
 }
 
 type SelectedImage = {
@@ -85,6 +89,7 @@ const EMPTY_FORM: FormState = {
     bathrooms: '',
     sqft: '',
     contact_number: '',
+    owner_email: '',
 }
 
 function Field({
@@ -152,6 +157,7 @@ export default function Create() {
     const [editingId, setEditingId] = useState<string | null>(null)
     const [editForm, setEditForm] = useState<Partial<FormState & { type: string }>>({})
     const [editUploadingImage, setEditUploadingImage] = useState(false)
+    const [listingSearch, setListingSearch] = useState('')
 
     const pickImages = async () => {
         const permission = await ImagePicker.requestMediaLibraryPermissionsAsync()
@@ -361,7 +367,8 @@ export default function Create() {
             bathrooms: Number(form.bathrooms) || 0,
             area_sqft: Number(form.sqft) || 0,
             images: finalImages,
-            contact_number: form.contact_number
+            contact_number: form.contact_number,
+            owner_email: user?.emailAddresses?.[0]?.emailAddress ?? '',
         })
 
         setPublishing(false)
@@ -461,6 +468,17 @@ export default function Create() {
         ])
     }
 
+    const soldproperty = async (id: any) => {
+        if (properties.find((x: any) => x.id === id)?.is_sold === false) {
+            await supabase.from('properties').update({ is_sold: true }).eq('id', id)
+            fetchProperty()
+        }
+        else {
+            await supabase.from('properties').update({ is_sold: false }).eq('id', id)
+            fetchProperty()
+        }
+    }
+
     // ── Menu Options ───────────────────────────────────────────────────────
     const showPropertyMenu = (p: Property) => {
         Alert.alert(
@@ -480,7 +498,14 @@ export default function Create() {
                     style: 'destructive',
                     onPress: () => deleteProperty(p.id),
                 },
-            ],
+                ...(p.is_sold === false ? [{
+                    text: 'Mark as Sold',
+                    onPress: () => soldproperty(p.id)
+                }] : [{
+                    text: 'Mark as Unsold',
+                    onPress: () => soldproperty(p.id)
+                }]
+                )],
             { cancelable: true }
         )
     }
@@ -495,6 +520,19 @@ export default function Create() {
             </SafeAreaView>
         )
     }
+
+    const owner_property = properties.filter((p: any) => p.owner_email === user?.emailAddresses?.[0]?.emailAddress)
+    const filteredOwnerProperties = owner_property.filter((p: any) => {
+        const query = listingSearch.trim().toLowerCase()
+        if (!query) return true
+
+        return (
+            p.title?.toLowerCase().includes(query) ||
+            p.city?.toLowerCase().includes(query) ||
+            p.address?.toLowerCase().includes(query) ||
+            p.type?.toLowerCase().includes(query)
+        )
+    })
 
     return (
         <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
@@ -780,8 +818,50 @@ export default function Create() {
                             </Text>
                             {!loading && (
                                 <Text style={{ fontSize: 12, color: C.textMuted }}>
-                                    {properties?.length} {properties?.length === 1 ? 'property' : 'properties'}
+                                    {filteredOwnerProperties?.length} {filteredOwnerProperties?.length === 1 ? 'property' : 'properties'}
                                 </Text>
+                            )}
+                        </View>
+
+                        <View
+                            style={{
+                                backgroundColor: C.surface,
+                                borderRadius: 16,
+                                borderWidth: 1,
+                                borderColor: C.border,
+                                paddingHorizontal: 14,
+                                paddingVertical: 12,
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                gap: 10,
+                                marginBottom: 14,
+                            }}
+                        >
+                            <Text style={{ fontSize: 18, color: C.accent }}>⌕</Text>
+                            <TextInput
+                                value={listingSearch}
+                                onChangeText={setListingSearch}
+                                placeholder="Search my listings..."
+                                placeholderTextColor={C.textMuted}
+                                style={{ flex: 1, color: C.textPrimary, fontSize: 14 }}
+                            />
+                            {listingSearch.length > 0 && (
+                                <TouchableOpacity
+                                    activeOpacity={0.8}
+                                    onPress={() => setListingSearch('')}
+                                    style={{
+                                        width: 24,
+                                        height: 24,
+                                        borderRadius: 999,
+                                        backgroundColor: C.surfaceAlt,
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                    }}
+                                >
+                                    <Text style={{ color: C.textSecondary, fontSize: 14, fontWeight: '800' }}>
+                                        ×
+                                    </Text>
+                                </TouchableOpacity>
                             )}
                         </View>
 
@@ -799,77 +879,146 @@ export default function Create() {
                                 <Text style={{ fontSize: 32, marginBottom: 8 }}>🏘️</Text>
                                 <Text style={{ color: C.textMuted, fontSize: 14 }}>No listings yet</Text>
                             </View>
+                        ) : filteredOwnerProperties.length === 0 ? (
+                            <View style={{
+                                backgroundColor: C.surface,
+                                borderRadius: 16,
+                                padding: 24,
+                                alignItems: 'center',
+                                borderWidth: 1,
+                                borderColor: C.border,
+                            }}>
+                                <Text style={{ fontSize: 28, marginBottom: 8 }}>🔎</Text>
+                                <Text style={{ color: C.textPrimary, fontSize: 14, fontWeight: '700', marginBottom: 4 }}>
+                                    No matching listings
+                                </Text>
+                                <Text style={{ color: C.textMuted, fontSize: 13, textAlign: 'center' }}>
+                                    Try a different title, city, or property type.
+                                </Text>
+                            </View>
                         ) : (
                             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
-                                {properties.map((p: any) => (
+                                {filteredOwnerProperties.map((p: any) => (
                                     <View
                                         key={p.id}
                                         style={{
                                             width: editingId === p.id ? '100%' : CARD_WIDTH,
                                             backgroundColor: C.surface,
-                                            borderRadius: 18,
+                                            borderRadius: 24,
                                             borderWidth: 1,
-                                            borderColor: editingId === p.id ? C.accent : C.border,
+                                            borderColor: editingId === p.id ? C.accent : 'rgba(226,229,236,0.9)',
                                             overflow: 'hidden',
+                                            shadowColor: '#0F172A',
+                                            shadowOpacity: 0.06,
+                                            shadowRadius: 12,
+                                            shadowOffset: { width: 0, height: 6 },
+                                            elevation: 2,
                                         }}
                                     >
                                         {/* Property summary row */}
-                                        <View style={{ padding: 12 }}>
-                                            {/* Type badge & 3-dot Menu */}
-                                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                                                <View style={{
-                                                    backgroundColor: C.accentLight,
-                                                    paddingHorizontal: 8,
-                                                    paddingVertical: 3,
-                                                    borderRadius: 999,
-                                                }}>
-                                                    <Text style={{ fontSize: 10, fontWeight: '700', color: C.accentText }}>
-                                                        {p.type}
-                                                    </Text>
-                                                </View>
+                                        <View style={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 12 }}>
+                                            <View
+                                                style={{
+                                                    flexDirection: 'row',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'space-between',
+                                                    marginBottom: 10,
+                                                }}
+                                            >
+                                                {p.is_sold === true ? (
+                                                    <View
+                                                        style={{
+                                                            backgroundColor: C.dangerLight,
+                                                            paddingHorizontal: 10,
+                                                            paddingVertical: 5,
+                                                            borderRadius: 999,
+                                                            alignSelf: 'flex-start',
+                                                        }}
+                                                    >
+                                                        <Text style={{ fontSize: 9, fontWeight: '800', color: C.danger }}>
+                                                            Sold
+                                                        </Text>
+                                                    </View>
+                                                ) : (
+                                                    <View style={{ flex: 1 }} />
+                                                )}
 
                                                 <TouchableOpacity
                                                     activeOpacity={0.7}
                                                     onPress={() => showPropertyMenu(p)}
-                                                    style={{
-                                                        paddingHorizontal: 8,
-                                                        paddingVertical: 2,
-                                                        borderRadius: 6,
-                                                    }}
+                                                // style={{
+                                                //     width: 32,
+                                                //     height: 32,
+                                                //     borderRadius: 999,
+                                                //     backgroundColor: C.surfaceAlt,
+                                                //     alignItems: 'center',
+                                                //     justifyContent: 'center',
+                                                // }}
                                                 >
-                                                    <Text style={{ fontSize: 16, color: C.textSecondary, fontWeight: '900' }}>
+                                                    <Text
+                                                        style={{
+                                                            fontSize: 16,
+                                                            color: C.textSecondary,
+                                                            fontWeight: '900',
+                                                        }}
+                                                    >
                                                         •••
                                                     </Text>
                                                 </TouchableOpacity>
                                             </View>
 
-                                            {/* Image */}
                                             <Image
                                                 source={{ uri: (p.images && p.images.length > 0) ? p.images[0] : 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80' }}
                                                 style={{
                                                     width: '100%',
-                                                    height: 105,
-                                                    borderRadius: 12,
+                                                    height: 156,
+                                                    borderRadius: 16,
                                                     backgroundColor: C.surfaceAlt,
                                                     marginBottom: 8,
                                                 }}
                                                 resizeMode="cover"
                                             />
 
-                                            {/* Name */}
-                                            <Text numberOfLines={1} style={{ fontSize: 14, fontWeight: '700', color: C.textPrimary, marginBottom: 4 }}>
-                                                {p.title}
-                                            </Text>
+                                            <View style={{ marginBottom: 4 }}>
+                                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 4 }}>
+                                                    <View style={{ flex: 1 }}>
 
-                                            {/* Address */}
-                                            <Text numberOfLines={1} style={{ fontSize: 12, color: C.textMuted, marginBottom: 6 }}>
-                                                {[p.city, p.address].filter(Boolean).join(', ')}
-                                            </Text>
+                                                        <Text numberOfLines={2} style={{ fontSize: 12, fontWeight: '700', color: C.textPrimary, lineHeight: 16 }}>
+                                                            {p.title}
+                                                        </Text>
+                                                    </View>
+                                                </View>
+                                                <View>
+                                                    <Text style={{ fontSize: 10, fontWeight: '700', color: C.textPrimary }}>
+                                                        {p.type[0].toUpperCase() + p.type.slice(1)}
+                                                    </Text>
+                                                </View>
+                                            </View>
 
-                                            {/* Price */}
-                                            <Text style={{ fontSize: 14, fontWeight: '800', color: C.accent }}>
-                                                ₹{p.price.toLocaleString('en-IN')}
+                                            <Text numberOfLines={1} style={{ fontSize: 11, color: C.textSecondary, marginBottom: 8 }}>
+                                                {[p.address, p.city].filter(Boolean).join(', ')}
                                             </Text>
+                                            <View>
+                                                <Text style={{ color: C.accentText, fontSize: 13, fontWeight: '800', marginBottom: 4 }}>
+                                                    ₹{p.price.toLocaleString('en-IN')}
+                                                </Text>
+                                            </View>
+
+                                            {/* <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 2 }}>
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                                                    <Text style={{ color: C.textSecondary, fontSize: 10, fontWeight: '700' }}>
+                                                        {p.bedrooms} beds
+                                                    </Text>
+                                                </View>
+
+                                                <View style={{ width: 1, height: 12, backgroundColor: C.border }} />
+
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                                                    <Text style={{ color: C.textSecondary, fontSize: 10, fontWeight: '700' }}>
+                                                        {p.bathrooms} baths
+                                                    </Text>
+                                                </View>
+                                            </View> */}
                                         </View>
 
                                         {/* ── Inline edit panel ── */}
@@ -1074,7 +1223,7 @@ export default function Create() {
                     </View>
                 </ScrollView>
             </KeyboardAvoidingView>
-        </SafeAreaView>
+        </SafeAreaView >
     )
 }
 

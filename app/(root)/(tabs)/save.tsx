@@ -1,21 +1,16 @@
-import { fetchSavedIds, toggleSave } from '../../../hooks/save_property'
-import { createClerkSupabaseClient } from '../../../lib/supabase'
 import { useAuth, useUser } from '@clerk/expo'
 import { useQuery } from '@tanstack/react-query'
 import { router, useFocusEffect } from 'expo-router'
 import React, { useCallback, useMemo } from 'react'
 import {
-    Dimensions,
     FlatList,
-    Image,
     Text,
-    TouchableOpacity,
     View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-const { width: SCREEN_WIDTH } = Dimensions.get('window')
-const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80'
-
+import { PropertyCard } from '../../../components/PropertyCard'
+import { fetchSavedIds, toggleSave } from '../../../hooks/save_property'
+import { createClerkSupabaseClient } from '../../../lib/supabase'
 const C = {
     bg: '#F5F6FA',
     surface: '#FFFFFF',
@@ -32,18 +27,6 @@ const C = {
     textSecondary: '#64748B',
     textMuted: '#94A3B8',
     white: '#FFFFFF',
-}
-
-const formatPrice = (price: number): string => {
-    if (price >= 10000000) return `₹${(price / 10000000).toFixed(1).replace(/\.0$/, '')} Cr`
-    if (price >= 100000) return `₹${(price / 100000).toFixed(1).replace(/\.0$/, '')} Lac`
-    if (price >= 1000) return `₹${(price / 1000).toFixed(1).replace(/\.0$/, '')}K`
-    return `₹${price}`
-}
-
-const openProperty = (id?: string) => {
-    if (!id) return
-    router.push({ pathname: '/property/[id]', params: { id } })
 }
 
 const Save = () => {
@@ -161,224 +144,25 @@ const Save = () => {
                 renderItem={({ item }: any) => {
                     const property = item.properties
 
+                    if (!property) return null
+
                     return (
-                        <TouchableOpacity
-                            onPress={() => openProperty(property?.id)}
-                            activeOpacity={0.85}
-                            style={{
-                                width: (SCREEN_WIDTH - 44) / 2,
-                                backgroundColor: C.surface,
-                                borderRadius: 18,
-                                overflow: 'hidden',
-                                borderWidth: 1,
-                                borderColor: C.border,
+                        <PropertyCard
+                            item={property}
+                            onPress={() => router.push({ pathname: '/property/[id]', params: { id: property.id } })}
+                            isSaved={true}
+                            onSave={async () => {
+                                await toggleSave(
+                                    property.id,
+                                    saved,
+                                    refetch,
+                                    supabase,
+                                    user?.id as string
+                                )
+
+                                refetch()
                             }}
-                        >
-                            <Image
-                                source={{ uri: property?.images?.[0] || FALLBACK_IMAGE }}
-                                style={{
-                                    width: '100%',
-                                    height: 115,
-                                    backgroundColor: C.surfaceAlt,
-                                }}
-                                resizeMode="cover"
-                            />
-
-                            {/* Featured badge */}
-                            <View
-                                style={{
-                                    position: 'absolute',
-                                    top: 8,
-                                    left: 8,
-                                    flexDirection: 'row',
-                                    gap: 4,
-                                    flexWrap: 'wrap',
-                                }}
-                            >
-                                {property?.is_featured && (
-                                    <View
-                                        style={{
-                                            backgroundColor: C.accentLight,
-                                            paddingHorizontal: 8,
-                                            paddingVertical: 3,
-                                            borderRadius: 999,
-                                        }}
-                                    >
-                                        <Text
-                                            style={{
-                                                color: C.accentText,
-                                                fontSize: 9,
-                                                fontWeight: '700',
-                                            }}
-                                        >
-                                            Featured
-                                        </Text>
-                                    </View>
-                                )}
-
-                                {property?.is_sold && (
-                                    <View
-                                        style={{
-                                            backgroundColor: C.dangerLight,
-                                            paddingHorizontal: 8,
-                                            paddingVertical: 3,
-                                            borderRadius: 999,
-                                        }}
-                                    >
-                                        <Text
-                                            style={{
-                                                color: C.danger,
-                                                fontSize: 9,
-                                                fontWeight: '700',
-                                            }}
-                                        >
-                                            Sold
-                                        </Text>
-                                    </View>
-                                )}
-                            </View>
-
-                            {/* Save button */}
-                            <TouchableOpacity
-                                onPress={async () => {
-                                    await toggleSave(
-                                        property.id,
-                                        saved,
-                                        refetch,
-                                        supabase,
-                                        user?.id as string
-                                    )
-
-                                    refetch()
-                                }}
-                                style={{
-                                    position: 'absolute',
-                                    top: 8,
-                                    right: 8,
-                                    width: 28,
-                                    height: 28,
-                                    borderRadius: 999,
-                                    backgroundColor: C.accentLight,
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    zIndex: 10,
-                                }}
-                            >
-                                <Text style={{ fontSize: 14 }}>
-                                    ❤️
-                                </Text>
-                            </TouchableOpacity>
-
-                            {/* Body */}
-                            <View style={{ padding: 10 }}>
-                                <Text
-                                    style={{
-                                        color: C.success,
-                                        fontSize: 14,
-                                        fontWeight: '800',
-                                        marginBottom: 2,
-                                    }}
-                                >
-                                    {formatPrice(property?.price)}
-                                </Text>
-
-                                <Text
-                                    numberOfLines={1}
-                                    style={{
-                                        color: C.textPrimary,
-                                        fontSize: 13,
-                                        fontWeight: '700',
-                                        marginBottom: 4,
-                                    }}
-                                >
-                                    {property?.title}
-                                </Text>
-
-                                <Text
-                                    numberOfLines={1}
-                                    style={{
-                                        color: C.textMuted,
-                                        fontSize: 11,
-                                        marginBottom: 8,
-                                    }}
-                                >
-                                    {property?.address}, {property?.city}
-                                </Text>
-
-                                {/* Stats */}
-                                <View
-                                    style={{
-                                        flexDirection: 'row',
-                                        backgroundColor: C.surfaceAlt,
-                                        borderRadius: 10,
-                                        overflow: 'hidden',
-                                    }}
-                                >
-                                    {[
-                                        {
-                                            value: property?.bedrooms,
-                                            label: 'Beds',
-                                        },
-                                        {
-                                            value: property?.bathrooms,
-                                            label: 'Baths',
-                                        },
-                                        {
-                                            value: property?.area_sqft,
-                                            label: 'Sqft',
-                                        },
-                                    ].map((stat, index) => (
-                                        <View
-                                            key={stat.label}
-                                            style={{
-                                                flex: 1,
-                                                flexDirection: 'row',
-                                            }}
-                                        >
-                                            {index !== 0 && (
-                                                <View
-                                                    style={{
-                                                        width: 1,
-                                                        backgroundColor:
-                                                            C.border,
-                                                        marginVertical: 6,
-                                                    }}
-                                                />
-                                            )}
-
-                                            <View
-                                                style={{
-                                                    flex: 1,
-                                                    alignItems: 'center',
-                                                    paddingVertical: 6,
-                                                }}
-                                            >
-                                                <Text
-                                                    style={{
-                                                        color:
-                                                            C.textPrimary,
-                                                        fontSize: 12,
-                                                        fontWeight: '700',
-                                                    }}
-                                                >
-                                                    {stat.value}
-                                                </Text>
-
-                                                <Text
-                                                    style={{
-                                                        color: C.textMuted,
-                                                        fontSize: 9,
-                                                        marginTop: 1,
-                                                    }}
-                                                >
-                                                    {stat.label}
-                                                </Text>
-                                            </View>
-                                        </View>
-                                    ))}
-                                </View>
-                            </View>
-                        </TouchableOpacity>
+                        />
                     )
                 }}
             />

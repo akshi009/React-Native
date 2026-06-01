@@ -5,7 +5,6 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import {
     Dimensions,
     FlatList,
-    Image,
     NativeScrollEvent,
     NativeSyntheticEvent,
     ScrollView,
@@ -19,17 +18,10 @@ import { fetchProperty } from '../../../hooks/property'
 import { fetchSavedIds, toggleSave } from '../../../hooks/save_property'
 import { createClerkSupabaseClient } from '../../../lib/supabase'
 import { useProductStore } from '../../../store/productStore'
+import { PropertyCard } from '../../../components/PropertyCard'
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window')
-const CARD_WIDTH = SCREEN_WIDTH - 64
-const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80'
-
-const formatPrice = (price: number): string => {
-    if (price >= 10000000) return `₹${(price / 10000000).toFixed(1).replace(/\.0$/, '')} Cr`
-    if (price >= 100000) return `₹${(price / 100000).toFixed(1).replace(/\.0$/, '')} Lac`
-    if (price >= 1000) return `₹${(price / 1000).toFixed(1).replace(/\.0$/, '')}K`
-    return `₹${price}`
-}
+const FEATURED_CARD_INTERVAL = SCREEN_WIDTH - 16
 
 const openProperty = (id: string) => {
     router.push({ pathname: '/property/[id]', params: { id } })
@@ -39,18 +31,19 @@ const openProperty = (id: string) => {
 const C = {
     bg: '#F5F6FA',   // page background
     surface: '#FFFFFF',   // cards, inputs
-    surfaceAlt: '#EEF0F5',   // stat chips, filter pills inactive
+    surfaceAlt: '#eef0f570',   // stat chips, filter pills inactive
     border: '#E2E5EC',   // dividers
     accent: '#2563EB',   // primary blue
-    accentLight: '#EBF2FF',   // badge bg, tint fills
+    accentLight: '#ebf2ffbb',   // badge bg, tint fills
     accentText: '#1D4ED8',   // text on accentLight
     success: '#059669',   // price green
     successLight: '#D1FAE5',
     danger: '#DC2626',   // sold badge
-    dangerLight: '#FEE2E2',
+    dangerLight: '#fee2e29c',
     textPrimary: '#0F172A',
-    textSecondary: '#64748B',
-    textMuted: '#94A3B8',
+    textSecondary: '#3c4046ff',
+    textMuted1: '#94A3B8',
+    textMuted: '#707c8cff',
     white: '#FFFFFF',
 }
 
@@ -124,7 +117,7 @@ export default function Home() {
     )
 
     const handleCarouselScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-        const index = Math.round(e.nativeEvent.contentOffset.x / (CARD_WIDTH + 16))
+        const index = Math.round(e.nativeEvent.contentOffset.x / FEATURED_CARD_INTERVAL)
         setActiveCarouselIndex(index)
     }
 
@@ -256,7 +249,7 @@ export default function Home() {
                             horizontal
                             pagingEnabled={false}
                             decelerationRate="fast"
-                            snapToInterval={CARD_WIDTH + 16}
+                            snapToInterval={FEATURED_CARD_INTERVAL}
                             snapToAlignment="start"
                             showsHorizontalScrollIndicator={false}
                             contentContainerStyle={{ paddingLeft: 16, paddingRight: 16 }}
@@ -264,121 +257,29 @@ export default function Home() {
                             scrollEventThrottle={16}
                         >
                             {featuredProperties.map((item: any) => (
-                                <TouchableOpacity
-                                    key={item.id}
-                                    activeOpacity={0.9}
-                                    onPress={() => openProperty(item.id)}
-                                    style={{
-                                        width: CARD_WIDTH,
-                                        height: 210,
-                                        borderRadius: 22,
-                                        overflow: 'hidden',
-                                        marginRight: 16,
-                                        backgroundColor: C.surfaceAlt,
-                                    }}
-                                >
-                                    <Image
-                                        source={{ uri: item.images?.[0] || FALLBACK_IMAGE }}
-                                        style={{ width: '100%', height: '100%', position: 'absolute' }}
-                                        resizeMode="cover"
-                                    />
+                                <View key={item.id} style={{ marginRight: 16 }}>
+                                    <PropertyCard
+                                        item={item}
+                                        variant="featured"
+                                        onPress={() => openProperty(item.id)}
+                                        isSaved={savedIds.has(item.id)}
+                                        onSave={async () => {
+                                            if (!user?.id) {
+                                                return
+                                            }
 
-                                    {/* Overlay on bottom half */}
-                                    <View style={{
-                                        position: 'absolute',
-                                        bottom: 0, left: 0, right: 0,
-                                        top: '38%',
-                                        backgroundColor: 'rgba(15,23,42,0.72)',
-                                        borderBottomLeftRadius: 22,
-                                        borderBottomRightRadius: 22,
-                                    }} />
-
-
-                                    {/* Save Button */}
-                                    <TouchableOpacity
-                                        onPress={async () => {
                                             await toggleSave(
                                                 item.id,
                                                 saved,
                                                 refetch,
                                                 supabase,
-                                                user?.id as string,
+                                                user.id,
                                             )
 
                                             refetch()
                                         }}
-                                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                                        style={{
-                                            position: 'absolute',
-                                            top: 14,
-                                            right: 14,
-                                            width: 34,
-                                            height: 34,
-                                            borderRadius: 999,
-                                            backgroundColor: savedIds.has(item.id)
-                                                ? 'rgba(255,255,255,0.95)'
-                                                : 'rgba(255,255,255,0.22)',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            backdropFilter: 'blur(8px)',
-                                            zIndex: 10,
-                                        }}
-                                    >
-                                        <Text style={{ fontSize: 16 }}>
-                                            {savedIds.has(item.id) ? '❤️' : '🤍'}
-                                        </Text>
-                                    </TouchableOpacity>
-
-                                    {/* Featured badge */}
-                                    <View style={{
-                                        position: 'absolute',
-                                        top: 14, left: 14,
-                                        backgroundColor: C.white,
-                                        paddingHorizontal: 12,
-                                        paddingVertical: 5,
-                                        borderRadius: 999,
-                                    }}>
-                                        <Text style={{ color: C.accent, fontSize: 11, fontWeight: '700' }}>
-                                            ✦ Featured
-                                        </Text>
-                                    </View>
-
-                                    {/* Card content */}
-                                    <View style={{
-                                        position: 'absolute',
-                                        bottom: 0, left: 0, right: 0,
-                                        padding: 16,
-                                    }}>
-                                        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                                            <Text style={{ color: '#6EE7B7', fontSize: 18, fontWeight: '800', marginBottom: 2 }}>
-                                                {formatPrice(item.price)}
-                                            </Text>
-                                            <Text style={{ backgroundColor: '#6EE7B7', padding: 5, borderRadius: 5, fontSize: 12, marginBottom: 10 }}>
-                                                {item.type}
-                                            </Text>
-                                        </View>
-                                        <Text numberOfLines={1} style={{ color: C.white, fontSize: 15, fontWeight: '700', marginBottom: 2 }}>
-                                            {item.title}
-                                        </Text>
-                                        <Text style={{ color: '#CBD5E1', fontSize: 12, marginBottom: 10 }}>
-                                            {item.city}
-                                        </Text>
-                                        <View style={{ flexDirection: 'row', gap: 6 }}>
-                                            {[`${item.bedrooms} Beds`, `${item.bathrooms} Baths`, `${item.area_sqft} sqft`].map((label) => (
-                                                <View key={label} style={{
-                                                    backgroundColor: 'rgba(255,255,255,0.18)',
-                                                    paddingHorizontal: 10,
-                                                    paddingVertical: 4,
-                                                    borderRadius: 999,
-                                                }}>
-                                                    <Text style={{ color: C.white, fontSize: 11, fontWeight: '600' }}>
-                                                        {label}
-                                                    </Text>
-                                                </View>
-                                            ))}
-                                        </View>
-                                    </View>
-                                </TouchableOpacity>
+                                    />
+                                </View>
                             ))}
                         </ScrollView>
 
@@ -432,129 +333,26 @@ export default function Home() {
                             columnWrapperStyle={{ gap: 12 }}
                             contentContainerStyle={{ gap: 12 }}
                             renderItem={({ item }) => (
-                                <TouchableOpacity
-                                    onPress={() => openProperty(item.id)}
-                                    activeOpacity={0.85}
-                                    style={{
-                                        width: (SCREEN_WIDTH - 44) / 2,
-                                        backgroundColor: C.surface,
-                                        borderRadius: 18,
-                                        overflow: 'hidden',
-                                        borderWidth: 1,
-                                        borderColor: C.border,
+                                <PropertyCard
+                                    item={item}
+                                    onPress={() => router.push({ pathname: '/property/[id]', params: { id: item.id } })}
+                                    isSaved={savedIds.has(item.id)}
+                                    onSave={async () => {
+                                        if (!user?.id) {
+                                            return
+                                        }
+
+                                        await toggleSave(
+                                            item.id,
+                                            saved,
+                                            refetch,
+                                            supabase,
+                                            user.id,
+                                        )
+
+                                        refetch()
                                     }}
-                                >
-                                    {/* Property image */}
-                                    <Image
-                                        source={{ uri: item.images?.[0] || FALLBACK_IMAGE }}
-                                        style={{ width: '100%', height: 115, backgroundColor: C.surfaceAlt }}
-                                        resizeMode="cover"
-                                    />
-
-                                    {/* Badges overlaid on image */}
-                                    <View style={{
-                                        position: 'absolute',
-                                        top: 8, left: 8,
-                                        flexDirection: 'row',
-                                        gap: 4,
-                                        flexWrap: 'wrap',
-                                    }}>
-                                        {item.is_featured && (
-                                            <View style={{
-                                                backgroundColor: C.accentLight,
-                                                paddingHorizontal: 8,
-                                                paddingVertical: 3,
-                                                borderRadius: 999,
-                                            }}>
-                                                <Text style={{ color: C.accentText, fontSize: 9, fontWeight: '700' }}>
-                                                    Featured
-                                                </Text>
-                                            </View>
-                                        )}
-                                        {item.is_sold && (
-                                            <View style={{
-                                                backgroundColor: C.dangerLight,
-                                                paddingHorizontal: 8,
-                                                paddingVertical: 3,
-                                                borderRadius: 999,
-                                            }}>
-                                                <Text style={{ color: C.danger, fontSize: 9, fontWeight: '700' }}>
-                                                    Sold
-                                                </Text>
-                                            </View>
-                                        )}
-                                    </View>
-
-                                    {/* Save Button overlaid on image */}
-                                    <TouchableOpacity
-                                        onPress={() => toggleSave(item.id, saved, refetch, supabase, user?.id as string)}
-                                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                                        style={{
-                                            position: 'absolute',
-                                            top: 8,
-                                            right: 8,
-                                            width: 28, height: 28,
-                                            borderRadius: 999,
-                                            backgroundColor: savedIds.has(item.id) ? C.accentLight : C.surfaceAlt,
-                                            alignItems: 'center', justifyContent: 'center',
-                                            zIndex: 10,
-                                        }}
-                                    >
-                                        <Text style={{ fontSize: 14 }}>
-                                            {savedIds.has(item.id) ? '❤️' : '🤍'}
-                                        </Text>
-                                    </TouchableOpacity>
-
-                                    {/* Card body */}
-                                    <View style={{ padding: 10 }}>
-                                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                                            <Text style={{ color: C.success, fontSize: 14, fontWeight: '800', marginBottom: 2 }}>
-                                                {formatPrice(item.price)}
-                                            </Text>
-                                            <Text style={{ backgroundColor: '#6EE7B7', padding: 5, borderRadius: 5, fontSize: 12, marginBottom: 3 }}>
-                                                {item.type}
-                                            </Text>
-                                        </View>
-                                        <Text numberOfLines={1} style={{ color: C.textPrimary, fontSize: 13, fontWeight: '700', marginBottom: 4 }}>
-                                            {item.title}
-                                        </Text>
-                                        <Text numberOfLines={1} style={{ color: C.textMuted, fontSize: 11, marginBottom: 8 }}>
-                                            {item.address}, {item.city}
-                                        </Text>
-
-                                        {/* Stats row */}
-                                        <View style={{
-                                            flexDirection: 'row',
-                                            backgroundColor: C.surfaceAlt,
-                                            borderRadius: 10,
-                                            overflow: 'hidden',
-                                        }}>
-                                            {[
-                                                { value: item.bedrooms, label: 'Beds' },
-                                                { value: item.bathrooms, label: 'Baths' },
-                                                { value: item.area_sqft, label: 'Sqft' },
-                                            ].map((stat, index) => (
-                                                <View key={stat.label} style={{ flex: 1, flexDirection: 'row' }}>
-                                                    {index !== 0 && (
-                                                        <View style={{
-                                                            width: 1,
-                                                            backgroundColor: C.border,
-                                                            marginVertical: 6,
-                                                        }} />
-                                                    )}
-                                                    <View style={{ flex: 1, alignItems: 'center', paddingVertical: 6 }}>
-                                                        <Text style={{ color: C.textPrimary, fontSize: 12, fontWeight: '700' }}>
-                                                            {stat.value}
-                                                        </Text>
-                                                        <Text style={{ color: C.textMuted, fontSize: 9, marginTop: 1 }}>
-                                                            {stat.label}
-                                                        </Text>
-                                                    </View>
-                                                </View>
-                                            ))}
-                                        </View>
-                                    </View>
-                                </TouchableOpacity>
+                                />
                             )}
                         />
                     )}
