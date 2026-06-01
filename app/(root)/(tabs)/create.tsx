@@ -481,31 +481,44 @@ export default function Create() {
 
     // ── Menu Options ───────────────────────────────────────────────────────
     const showPropertyMenu = (p: Property) => {
+        const soldButton = p.is_sold === false
+            ? { text: 'Mark as Sold', onPress: () => soldproperty(p.id) }
+            : { text: 'Mark as Unsold', onPress: () => soldproperty(p.id) }
+
+        const iosButtons = [
+            {
+                text: 'Cancel',
+                style: 'cancel' as const,
+            },
+            {
+                text: 'Edit Listing',
+                onPress: () => startEdit(p),
+            },
+            {
+                text: 'Delete Listing',
+                style: 'destructive' as const,
+                onPress: () => deleteProperty(p.id),
+            },
+            soldButton,
+        ]
+
+        const androidButtons = [
+            {
+                text: 'Edit Listing',
+                onPress: () => startEdit(p),
+            },
+            soldButton,
+            {
+                text: 'Delete Listing',
+                style: 'destructive' as const,
+                onPress: () => deleteProperty(p.id),
+            },
+        ]
+
         Alert.alert(
             p.title,
             'Manage this listing',
-            [
-                {
-                    text: 'Cancel',
-                    style: 'cancel',
-                },
-                {
-                    text: 'Edit Listing',
-                    onPress: () => startEdit(p),
-                },
-                {
-                    text: 'Delete Listing',
-                    style: 'destructive',
-                    onPress: () => deleteProperty(p.id),
-                },
-                ...(p.is_sold === false ? [{
-                    text: 'Mark as Sold',
-                    onPress: () => soldproperty(p.id)
-                }] : [{
-                    text: 'Mark as Unsold',
-                    onPress: () => soldproperty(p.id)
-                }]
-                )],
+            Platform.OS === 'android' ? androidButtons : iosButtons,
             { cancelable: true }
         )
     }
