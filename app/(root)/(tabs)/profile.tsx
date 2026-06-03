@@ -1,4 +1,5 @@
 import { useAuth, useUser } from '@clerk/expo'
+import { Ionicons } from '@expo/vector-icons'
 import { useQuery } from '@tanstack/react-query'
 import { useFocusEffect, useRouter } from 'expo-router'
 import React, { useCallback } from 'react'
@@ -16,34 +17,33 @@ import { useProductStore } from '../../../store/productStore'
 import { useUserStore } from '../../../store/userStore'
 
 const C = {
-    bg: '#F5F6FA',
+    bg: '#F7F7F7',
     surface: '#FFFFFF',
-    surfaceAlt: '#EEF0F5',
-    border: '#E2E5EC',
-    accent: '#2563EB',
-    accentLight: '#EBF2FF',
+    surfaceAlt: '#F2F3F5',
+    border: '#EBEBEB',
+    accent: '#111111',
+    accentLight: '#F2F3F5',
     success: '#059669',
     danger: '#DC2626',
-    textPrimary: '#0F172A',
-    textSecondary: '#64748B',
-    textMuted: '#94A3B8',
+    textPrimary: '#111111',
+    textSecondary: '#555555',
+    textMuted: '#AAAAAA',
     white: '#FFFFFF',
 }
 
 const MENU_ITEMS = [
     {
-        icon: '❤️',
+        icon: 'heart-outline',
         title: 'Saved Properties',
         subtitle: 'View your favourites',
         url: '/(root)/(tabs)/save'
     },
     {
-        icon: '🏡',
+        icon: 'home-outline',
         title: 'My Listings',
         subtitle: 'Manage your properties',
         url: '/(root)/(tabs)/create'
     },
-
 ]
 
 const Profile = () => {
@@ -51,11 +51,10 @@ const Profile = () => {
     const router = useRouter()
     const { user } = useUser()
     const isAdmin = useUserStore(state => state.isAdmin)
-    const { getToken } = useAuth();
+    const { getToken } = useAuth()
     const supabase = createClerkSupabaseClient(getToken)
     const { data: saved, refetch } = useQuery({ queryKey: ['saved'], queryFn: () => fetchSavedIds(supabase, user?.id as string) })
     useFocusEffect(useCallback(() => { refetch() }, []))
-
 
     const initials =
         `${user?.firstName?.[0] ?? ''}${user?.lastName?.[0] ?? ''}`.toUpperCase()
@@ -80,29 +79,23 @@ const Profile = () => {
                 <View
                     style={{
                         paddingHorizontal: 20,
-                        paddingTop: 12,
+                        paddingTop: 20,
                         paddingBottom: 24,
                     }}
                 >
-                    <Text
+                    {/* <Text
                         style={{
                             fontSize: 28,
                             fontWeight: '800',
                             color: C.textPrimary,
+                            lineHeight: 40,
+                            letterSpacing: -0.5,
                         }}
                     >
                         My Profile
-                    </Text>
+                    </Text> */}
 
-                    <Text
-                        style={{
-                            color: C.textMuted,
-                            marginTop: 4,
-                            fontSize: 14,
-                        }}
-                    >
-                        Manage your account and activity
-                    </Text>
+
                 </View>
 
                 {/* Profile Card */}
@@ -110,8 +103,8 @@ const Profile = () => {
                     style={{
                         marginHorizontal: 16,
                         backgroundColor: C.surface,
-                        borderRadius: 28,
-                        padding: 20,
+                        borderRadius: 24,
+                        padding: 24,
                         borderWidth: 1,
                         borderColor: C.border,
                         marginBottom: 22,
@@ -130,6 +123,8 @@ const Profile = () => {
                                     width: 96,
                                     height: 96,
                                     borderRadius: 999,
+                                    borderWidth: 1,
+                                    borderColor: C.border,
                                     marginBottom: 14,
                                 }}
                             />
@@ -139,15 +134,17 @@ const Profile = () => {
                                     width: 96,
                                     height: 96,
                                     borderRadius: 999,
-                                    backgroundColor: C.accent,
+                                    backgroundColor: C.surfaceAlt,
                                     justifyContent: 'center',
                                     alignItems: 'center',
+                                    borderWidth: 1,
+                                    borderColor: C.border,
                                     marginBottom: 14,
                                 }}
                             >
                                 <Text
                                     style={{
-                                        color: C.white,
+                                        color: C.textPrimary,
                                         fontSize: 28,
                                         fontWeight: '800',
                                     }}
@@ -188,7 +185,7 @@ const Profile = () => {
                         >
                             <Text
                                 style={{
-                                    color: C.accent,
+                                    color: C.textPrimary,
                                     fontWeight: '700',
                                     fontSize: 12,
                                 }}
@@ -204,7 +201,7 @@ const Profile = () => {
                             flexDirection: 'row',
                             marginTop: 24,
                             backgroundColor: C.surfaceAlt,
-                            borderRadius: 18,
+                            borderRadius: 16,
                             overflow: 'hidden',
                         }}
                     >
@@ -217,9 +214,8 @@ const Profile = () => {
                                 style={{
                                     flex: 1,
                                     alignItems: 'center',
-                                    paddingVertical: 16,
-                                    borderRightWidth:
-                                        index !== 2 ? 1 : 0,
+                                    paddingVertical: 14,
+                                    borderRightWidth: index === 0 ? 1 : 0,
                                     borderColor: C.border,
                                 }}
                             >
@@ -236,7 +232,7 @@ const Profile = () => {
                                 <Text
                                     style={{
                                         fontSize: 12,
-                                        color: C.textMuted,
+                                        color: C.textSecondary,
                                         marginTop: 3,
                                     }}
                                 >
@@ -278,13 +274,9 @@ const Profile = () => {
                                     justifyContent: 'center',
                                     alignItems: 'center',
                                     marginRight: 14,
-
                                 }}
-
                             >
-                                <Text style={{ fontSize: 22 }}>
-                                    {item.icon}
-                                </Text>
+                                <Ionicons name={item.icon as any} size={20} color={C.textPrimary} />
                             </View>
 
                             <View style={{ flex: 1 }}>
@@ -309,14 +301,7 @@ const Profile = () => {
                                 </Text>
                             </View>
 
-                            <Text
-                                style={{
-                                    fontSize: 18,
-                                    color: C.textMuted,
-                                }}
-                            >
-                                ›
-                            </Text>
+                            <Ionicons name="chevron-forward" size={18} color={C.textMuted} />
                         </TouchableOpacity>
                     ))}
                 </View>
@@ -333,7 +318,7 @@ const Profile = () => {
                         style={{
                             backgroundColor: C.textPrimary,
                             paddingVertical: 16,
-                            borderRadius: 18,
+                            borderRadius: 16,
                             alignItems: 'center',
                         }}
                         onPress={async () => {

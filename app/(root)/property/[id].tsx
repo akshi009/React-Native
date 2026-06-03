@@ -18,33 +18,30 @@ import {
     View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { PropertyCard } from '../../../components/PropertyCard'
 import { fetchProperty } from '../../../hooks/property'
 import { fetchSavedIds, toggleSave } from '../../../hooks/save_property'
 import { createClerkSupabaseClient } from '../../../lib/supabase'
-import { PropertyCard } from '../../../components/PropertyCard'
 import { useProductStore } from '../../../store/productStore'
 import { Property } from '../../../types'
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window')
-const CAROUSEL_HEIGHT = Math.min(360, SCREEN_WIDTH * 0.9)
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window')
+const IMAGE_HEIGHT = SCREEN_HEIGHT * 0.52
 
 const C = {
-    bg: '#F5F6FA',
+    bg: '#FFFFFF',
     surface: '#FFFFFF',
-    surfaceAlt: '#EEF0F5',
-    border: '#E2E5EC',
-    accent: '#2563EB',
-    accentLight: '#EBF2FF',
-    accentText: '#1D4ED8',
-    success: '#059669',
-    successLight: '#D1FAE5',
+    surfaceAlt: '#F2F3F5',
+    border: '#EBEBEB',
+    textPrimary: '#111111',
+    textSecondary: '#666666',
+    textMuted: '#AAAAAA',
     danger: '#DC2626',
     dangerLight: '#FEE2E2',
-    textPrimary: '#0F172A',
-    textSecondary: '#64748B',
-    textMuted: '#94A3B8',
+    accent: '#111111',
     white: '#FFFFFF',
 }
+
 const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80'
 
 const formatPrice = (price: number): string => {
@@ -63,6 +60,7 @@ export default function PropertyDetails() {
     const [activeImageIndex, setActiveImageIndex] = useState(0)
     const [search, setSearch] = useState('')
     const [loading, setLoading] = useState(false)
+    const [descExpanded, setDescExpanded] = useState(false)
     const { data: saved, refetch: refetchSaved } = useQuery({
         queryKey: ['savedIds', user?.id],
         queryFn: () => fetchSavedIds(supabase, user?.id as string),
@@ -95,7 +93,6 @@ export default function PropertyDetails() {
     const relatedProperties = useMemo(() => {
         if (!property) return []
         const query = search.trim().toLowerCase()
-
         return properties.filter((item: Property) => {
             if (item.id === property.id) return false
             const matchesTheme = item.type === property.type || item.city === property.city
@@ -104,7 +101,6 @@ export default function PropertyDetails() {
                 item.title?.toLowerCase().includes(query) ||
                 item.city?.toLowerCase().includes(query) ||
                 item.address?.toLowerCase().includes(query)
-
             return matchesTheme && matchesQuery
         })
     }, [properties, property, search])
@@ -116,31 +112,91 @@ export default function PropertyDetails() {
             return
         }
 
-        const phone = (property.contact_number)
+        const phone = property.contact_number
+        const email = property.owner_email
 
-        try {
-            if (phone) {
-                const url = `tel:${phone}`
-                const supported = await Linking.canOpenURL(url)
-                if (supported) return Linking.openURL(url)
-            }
-
-            // if (email) {
-            //     const url = `mailto:${email}?subject=${encodeURIComponent(`Inquiry about ${property.title}`)}`
-            //     const supported = await Linking.canOpenURL(url)
-            //     if (supported) return Linking.openURL(url)
-            // }
-
+        if (!phone && !email) {
             Alert.alert('Contact unavailable', 'This listing does not have owner contact details yet.')
-        } catch {
-            Alert.alert('Contact unavailable', 'Unable to open the contact app right now.')
+            return
         }
+
+        const buttons: Array<{ text: string; style?: 'default' | 'cancel' | 'destructive'; onPress?: () => void }> = []
+
+        if (phone) {
+            buttons.push({
+                text: 'Send WhatsApp Message',
+                onPress: async () => {
+                    const cleanPhone = String(phone).replace(/[^\d]/g, '')
+                    const message = encodeURIComponent(
+                        `Hello, I am interested in your property listing: ${property.title}. Can we discuss further?`
+                    )
+                    const url = `https://wa.me/${phone}?text=${message}`
+                    try {
+                        await Linking.openURL(url)
+                    } catch {
+                        Alert.alert('Error', 'Failed to open WhatsApp. Please check the phone number and try again.')
+                    }
+                }
+            })
+
+            buttons.push({
+                text: 'Call Owner',
+                onPress: async () => {
+                    const url = `tel:${phone}`
+                    try {
+                        const supported = await Linking.canOpenURL(url)
+                        if (supported) {
+                            await Linking.openURL(url)
+                        } else {
+                            Alert.alert('Error', 'Unable to make phone calls on this device.')
+                        }
+                    } catch {
+                        Alert.alert('Error', 'An error occurred while trying to make a call.')
+                    }
+                }
+            })
+
+        }
+
+        if (email) {
+            buttons.push({
+                text: 'Send Email',
+                onPress: async () => {
+                    const url = `mailto:${email}`
+                    try {
+                        const supported = await Linking.canOpenURL(url)
+                        if (supported) {
+                            await Linking.openURL(url)
+                        } else {
+                            Alert.alert('Error', 'No email client configured on this device.')
+                        }
+                    } catch {
+                        Alert.alert('Error', 'An error occurred while trying to send an email.')
+                    }
+                }
+            })
+        }
+
+
+        if (Platform.OS === 'ios') {
+            buttons.push({
+                text: 'Cancel',
+                style: 'cancel'
+            })
+        }
+
+        Alert.alert(
+            'Contact Owner',
+            'How would you like to contact the owner of this property?',
+            buttons
+        )
     }
+
 
     if (loading && !property) {
         return (
             <SafeAreaView style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ color: C.textSecondary }}>Loading property...</Text>
+                <Text style={{ color: C.textMuted }}>Loading property...</Text>
             </SafeAreaView>
         )
     }
@@ -156,283 +212,254 @@ export default function PropertyDetails() {
                 </Text>
                 <TouchableOpacity
                     onPress={() => router.back()}
-                    style={{
-                        backgroundColor: C.accent,
-                        paddingVertical: 14,
-                        borderRadius: 16,
-                        alignItems: 'center',
-                    }}
+                    style={{ backgroundColor: C.accent, paddingVertical: 16, borderRadius: 16, alignItems: 'center' }}
                 >
-                    <Text style={{ color: C.white, fontWeight: '800' }}>Go Back</Text>
+                    <Text style={{ color: C.white, fontWeight: '700' }}>Go Back</Text>
                 </TouchableOpacity>
             </SafeAreaView>
         )
     }
 
+    const images = property.images?.length ? property.images : [FALLBACK_IMAGE]
+    const description = property.description || 'No description available for this listing yet.'
+    const shortDesc = description.length > 120 ? description.slice(0, 120) + '...' : description
+
     return (
-        <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
-            <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} >
-                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
-                    <View style={{ paddingHorizontal: 16, paddingTop: 10 }}>
-                        <View
-                            style={{
-                                flexDirection: 'row',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                marginBottom: 14,
-                            }}
-                        >
-                            <TouchableOpacity
-                                onPress={() => router.back()}
-                                style={{
-                                    width: 42,
-                                    height: 42,
-                                    borderRadius: 14,
-                                    backgroundColor: C.surface,
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    borderWidth: 1,
-                                    borderColor: C.border,
-                                }}
-                            >
-                                <Ionicons name="chevron-back" size={22} color={C.textPrimary} />
-                            </TouchableOpacity>
+        <View style={{ flex: 1, backgroundColor: C.bg }}>
+            <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
 
-                            <View
-                                style={{
-                                    backgroundColor: C.surface,
-                                    borderWidth: 1,
-                                    borderColor: C.border,
-                                    borderRadius: 999,
-                                    paddingHorizontal: 12,
-                                    paddingVertical: 7,
-                                }}
-                            >
-                                <Text style={{ color: C.textSecondary, fontSize: 12, fontWeight: '700' }}>
-                                    {property.type}
-                                </Text>
-                            </View>
-
-                            <TouchableOpacity
-                                onPress={async () => {
-                                    if (!user?.id) {
-                                        Alert.alert('Sign in required', 'Please sign in to save properties.')
-                                        return
-                                    }
-
-                                    await toggleSave(property.id, saved, refetchSaved, supabase, user.id)
-                                }}
-                                activeOpacity={0.85}
-                                style={{
-                                    width: 42,
-                                    height: 42,
-                                    borderRadius: 14,
-                                    backgroundColor: isSaved ? 'rgba(254,242,242,0.96)' : C.surface,
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    borderWidth: 1,
-                                    borderColor: isSaved ? 'rgba(220,38,38,0.18)' : C.border,
-                                }}
-                            >
-                                <Ionicons
-                                    name={isSaved ? 'heart' : 'heart-outline'}
-                                    size={20}
-                                    color={isSaved ? C.danger : C.textPrimary}
-                                />
-                            </TouchableOpacity>
-
-                        </View>
-                    </View>
-
-                    <View style={{ paddingHorizontal: 16 }}>
+                    {/* ── Full-bleed hero image ── */}
+                    <View style={{ width: SCREEN_WIDTH, height: IMAGE_HEIGHT, position: 'relative' }}>
                         <FlatList
-                            data={property.images?.length ? property.images : [FALLBACK_IMAGE]}
-                            keyExtractor={(_, index) => `${property.id}-image-${index}`}
+                            data={images}
+                            keyExtractor={(_, i) => `img-${i}`}
                             horizontal
                             pagingEnabled
                             showsHorizontalScrollIndicator={false}
-                            onMomentumScrollEnd={(event) => {
-                                const index = Math.round(event.nativeEvent.contentOffset.x / SCREEN_WIDTH)
-                                setActiveImageIndex(index)
+                            onMomentumScrollEnd={(e) => {
+                                setActiveImageIndex(Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH))
                             }}
                             renderItem={({ item }) => (
-                                <View
-                                    style={{
-                                        width: SCREEN_WIDTH - 32,
-                                        height: CAROUSEL_HEIGHT,
-                                        borderRadius: 28,
-                                        overflow: 'hidden',
-                                        marginRight: 12,
-                                        backgroundColor: C.surfaceAlt,
-                                    }}
-                                >
-                                    <Image source={{ uri: item }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                                </View>
+                                <Image
+                                    source={{ uri: item }}
+                                    style={{ width: SCREEN_WIDTH, height: IMAGE_HEIGHT }}
+                                    resizeMode="cover"
+                                />
                             )}
                         />
 
-                        {property.images?.length > 1 && (
-                            <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: 12 }}>
-                                {property.images.map((_: any, index: number) => (
-                                    <View
-                                        key={index}
-                                        style={{
-                                            height: 6,
-                                            width: activeImageIndex === index ? 18 : 6,
-                                            borderRadius: 999,
-                                            backgroundColor: activeImageIndex === index ? C.accent : C.border,
-                                        }}
-                                    />
-                                ))}
-                            </View>
-                        )}
-                    </View>
-
-                    <View style={{ paddingHorizontal: 16, marginTop: 18 }}>
+                        {/* Overlay gradient hint */}
                         <View
                             style={{
-                                backgroundColor: C.surface,
-                                borderRadius: 24,
-                                padding: 14,
-                                borderWidth: 1,
-                                borderColor: C.border,
+                                position: 'absolute',
+                                top: 0, left: 0, right: 0, bottom: 0,
+                                backgroundColor: 'rgba(0,0,0,0.10)',
                             }}
-                        >
-                            <View
-                                style={{
-                                    borderRadius: 20,
+                            pointerEvents="none"
+                        />
 
-                                }}
-                            >
-                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-                                    <Text
-                                        style={{
-                                            flex: 1,
-                                            color: C.textPrimary,
-                                            fontSize: 18,
-                                            fontWeight: '800',
-                                        }}
-                                        numberOfLines={2}
-                                    >
-                                        {property.title}
-                                    </Text>
-                                    <Text style={{ color: C.accentText, fontSize: 22, fontWeight: '900' }}>
-                                        {formatPrice(property.price)}
-                                    </Text>
-                                </View>
-                                {isSold && (
-                                    <View style={{
-                                        alignSelf: 'flex-start',
-                                        marginTop: 10,
-                                        marginBottom: 2,
-                                        backgroundColor: C.dangerLight,
-                                        paddingHorizontal: 10,
-                                        paddingVertical: 5,
-                                        borderRadius: 999,
-                                    }}>
-                                        <Text style={{ color: C.danger, fontSize: 11, fontWeight: '800' }}>
-                                            Sold
-                                        </Text>
-                                    </View>
-                                )}
-                                <Text style={{ color: C.textSecondary, fontSize: 12, marginTop: 4 }}>
-                                    {[property.address, property.city].filter(Boolean).join(', ')}
-                                </Text>
-                            </View>
-                            <View style={{ flexDirection: 'row', gap: 10, marginVertical: 16, flexWrap: 'wrap' }}>
-                                <View style={{ backgroundColor: C.surfaceAlt, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 }}>
-                                    <Text style={{ color: C.textSecondary, fontSize: 12, fontWeight: '700' }}>
-                                        {property.bedrooms} Beds
-                                    </Text>
-                                </View>
-                                <View style={{ backgroundColor: C.surfaceAlt, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 }}>
-                                    <Text style={{ color: C.textSecondary, fontSize: 12, fontWeight: '700' }}>
-                                        {property.bathrooms} Baths
-                                    </Text>
-                                </View>
-                                <View style={{ backgroundColor: C.surfaceAlt, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 }}>
-                                    <Text style={{ color: C.textSecondary, fontSize: 12, fontWeight: '700' }}>
-                                        {property.area_sqft} sqft
-                                    </Text>
-                                </View>
-                            </View>
-
-                            <Text style={{ color: C.textPrimary, fontSize: 18, fontWeight: '800', marginBottom: 8 }}>
-                                Description
-                            </Text>
-                            <Text style={{ color: C.textSecondary, lineHeight: 22, fontSize: 14 }}>
-                                {property.description || 'No description available for this listing yet.'}
-                            </Text>
-
-                            <View style={{ marginTop: 18, padding: 14, borderRadius: 18, backgroundColor: C.surfaceAlt }}>
-                                <Text style={{ color: C.textMuted, fontSize: 12, fontWeight: '700', marginBottom: 4 }}>
-                                    Contact
-                                </Text>
-                                <Text style={{ color: C.textPrimary, fontSize: 16, fontWeight: '800' }}>
-                                    {property.owner_name || 'Property Owner'}
-                                </Text>
-
+                        {/* Top nav row */}
+                        <SafeAreaView style={{ position: 'absolute', top: 0, left: 0, right: 0 }}>
+                            <View style={{
+                                flexDirection: 'row',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                paddingHorizontal: 16,
+                                paddingTop: 8,
+                            }}>
                                 <TouchableOpacity
-                                    activeOpacity={0.9}
-                                    onPress={openContact}
-                                    disabled={isSold}
+                                    onPress={() => router.back()}
                                     style={{
-                                        marginTop: 16,
-                                        backgroundColor: isSold ? C.surfaceAlt : C.accent,
-                                        paddingVertical: 16,
-                                        borderRadius: 18,
+                                        width: 38,
+                                        height: 38,
+                                        borderRadius: 999,
+                                        backgroundColor: 'rgba(255,255,255,0.85)',
                                         alignItems: 'center',
-                                        shadowColor: '#000',
-                                        shadowOpacity: 0.1,
-                                        shadowRadius: 12,
-                                        shadowOffset: { width: 0, height: 8 },
-                                        elevation: 3,
-                                        opacity: isSold ? 0.65 : 1,
+                                        justifyContent: 'center',
                                     }}
                                 >
-                                    <Text style={{ color: isSold ? C.textSecondary : C.white, fontWeight: '800', fontSize: 15 }}>
-                                        {isSold ? 'Sold' : 'Contact Now'}
-                                    </Text>
+                                    <Ionicons name="chevron-back" size={20} color="#111111" />
+                                </TouchableOpacity>
+
+                                {/* Dot indicators */}
+                                {images.length > 1 && (
+                                    <View style={{ flexDirection: 'row', gap: 5, alignItems: 'center' }}>
+                                        {images.map((_: any, i: number) => (
+                                            <View
+                                                key={i}
+                                                style={{
+                                                    height: 5,
+                                                    width: activeImageIndex === i ? 16 : 5,
+                                                    borderRadius: 999,
+                                                    backgroundColor: activeImageIndex === i ? C.white : 'rgba(255,255,255,0.5)',
+                                                }}
+                                            />
+                                        ))}
+                                    </View>
+                                )}
+
+                                <TouchableOpacity
+                                    onPress={async () => {
+                                        if (!user?.id) {
+                                            Alert.alert('Sign in required', 'Please sign in to save properties.')
+                                            return
+                                        }
+                                        await toggleSave(property.id, saved, refetchSaved, supabase, user.id)
+                                        refetchSaved()
+                                    }}
+                                    style={{
+                                        width: 38,
+                                        height: 38,
+                                        borderRadius: 999,
+                                        backgroundColor: 'rgba(255,255,255,0.85)',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                    }}
+                                >
+                                    <Ionicons
+                                        name={isSaved ? 'heart' : 'heart-outline'}
+                                        size={18}
+                                        color={isSaved ? C.danger : '#111111'}
+                                    />
                                 </TouchableOpacity>
                             </View>
+                        </SafeAreaView>
+                    </View>
 
+                    {/* ── White bottom sheet ── */}
+                    <View
+                        style={{
+                            backgroundColor: C.white,
+                            borderTopLeftRadius: 28,
+                            borderTopRightRadius: 28,
+                            marginTop: -24,
+                            paddingHorizontal: 22,
+                            paddingTop: 24,
+                            paddingBottom: 8,
+                        }}
+                    >
+                        {/* Drag handle */}
+                        <View style={{ width: 36, height: 4, borderRadius: 999, backgroundColor: '#E0E0E0', alignSelf: 'center', marginBottom: 20 }} />
+
+                        <Text style={{ color: C.textSecondary, fontSize: 8, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 3 }}>
+                            {property.type}
+                        </Text>
+                        {/* Title row */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                            <Text style={{ flex: 1, fontSize: 22, fontWeight: '800', color: C.textPrimary, letterSpacing: -0.3, marginRight: 12 }} numberOfLines={2}>
+                                {property.title}
+                            </Text>
+                            {isSold && (
+                                <View style={{ backgroundColor: C.dangerLight, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, marginTop: 4 }}>
+                                    <Text style={{ color: C.danger, fontSize: 11, fontWeight: '700' }}>Sold</Text>
+                                </View>
+                            )}
+                        </View>
+
+                        {/* Location */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 16 }}>
+                            <Text style={{ color: C.textSecondary, fontSize: 13 }}>
+                                {[property.address, property.city].filter(Boolean).join(', ')}
+                            </Text>
+                        </View>
+
+                        {/* Description */}
+                        <Text style={{ color: C.textSecondary, fontSize: 14, lineHeight: 22, marginBottom: 20 }}>
+                            {descExpanded ? description : shortDesc}
+                        </Text>
+                        {description.length > 120 && (
+                            <TouchableOpacity onPress={() => setDescExpanded(!descExpanded)} style={{ marginBottom: 20 }}>
+                                <Text style={{ color: C.textPrimary, fontSize: 13, fontWeight: '700', textDecorationLine: 'underline' }}>
+                                    {descExpanded ? 'Show less' : 'Read more'}
+                                </Text>
+                            </TouchableOpacity>
+                        )}
+
+                        {/* Stat chips */}
+                        <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap', marginBottom: 22 }}>
+                            {property.bathrooms != null && (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.surfaceAlt, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999 }}>
+                                    {/* <Ionicons name="water-outline" size={14} color={C.textSecondary} /> */}
+                                    <Text style={{ color: C.textSecondary, fontSize: 13, fontWeight: '600' }}>{property.bathrooms} baths</Text>
+                                </View>
+                            )}
+                            {property.bedrooms != null && (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.surfaceAlt, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999 }}>
+                                    {/* <Ionicons name="bed-outline" size={14} color={C.textSecondary} /> */}
+                                    <Text style={{ color: C.textSecondary, fontSize: 13, fontWeight: '600' }}>{property.bedrooms} beds</Text>
+                                </View>
+                            )}
+                            {property.area_sqft != null && (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.surfaceAlt, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999 }}>
+                                    {/* <Ionicons name="resize-outline" size={14} color={C.textSecondary} /> */}
+                                    <Text style={{ color: C.textSecondary, fontSize: 13, fontWeight: '600' }}>{property.area_sqft} sqft</Text>
+                                </View>
+                            )}
+                        </View>
+
+                        {/* Price + CTA */}
+                        <View style={{ marginBottom: 8 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6, marginBottom: 16 }}>
+                                <Text style={{ fontSize: 32, fontWeight: '800', color: C.textPrimary, letterSpacing: -0.5 }}>
+                                    {formatPrice(property.price)}
+                                </Text>
+                            </View>
+
+                            <TouchableOpacity
+                                activeOpacity={0.88}
+                                onPress={openContact}
+                                disabled={isSold}
+                                style={{
+                                    backgroundColor: isSold ? C.surfaceAlt : C.accent,
+                                    paddingVertical: 18,
+                                    borderRadius: 16,
+                                    alignItems: 'center',
+                                    flexDirection: 'row',
+                                    justifyContent: 'center',
+                                    gap: 8,
+                                    opacity: isSold ? 0.55 : 1,
+                                }}
+                            >
+                                {/* <Ionicons name="paper-plane-outline" size={16} color={isSold ? C.textMuted : C.white} /> */}
+                                <Text style={{ color: isSold ? C.textMuted : C.white, fontWeight: '700', fontSize: 15 }}>
+                                    {isSold ? 'Sold' : 'Contact Owner'}
+                                </Text>
+                            </TouchableOpacity>
                         </View>
                     </View>
 
-                    <View style={{ paddingHorizontal: 16, marginTop: 22 }}>
-                        <Text style={{ fontSize: 18, fontWeight: '800', color: C.textPrimary, marginBottom: 8 }}>
-                            Search for more such properties
+                    {/* ── Related Properties ── */}
+                    <View style={{ paddingHorizontal: 20, marginTop: 28 }}>
+                        <Text style={{ fontSize: 18, fontWeight: '700', color: C.textPrimary, marginBottom: 14 }}>
+                            Similar Properties
                         </Text>
-                        <TextInput
-                            value={search}
-                            onChangeText={setSearch}
-                            placeholder="Search by city, area, or title"
-                            placeholderTextColor={C.textMuted}
-                            style={{
-                                backgroundColor: C.surface,
-                                borderRadius: 16,
-                                paddingHorizontal: 14,
-                                paddingVertical: 14,
-                                borderWidth: 1,
-                                borderColor: C.border,
-                                color: C.textPrimary,
-                                marginBottom: 14,
-                            }}
-                        />
+
+                        <View style={{
+                            backgroundColor: C.white,
+                            borderRadius: 16,
+                            paddingHorizontal: 14,
+                            paddingVertical: 12,
+                            borderWidth: 1,
+                            borderColor: C.border,
+                            marginBottom: 16,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 10,
+                        }}>
+                            <Ionicons name="search-outline" size={16} color={C.textMuted} />
+                            <TextInput
+                                value={search}
+                                onChangeText={setSearch}
+                                placeholder="Search by city, area, or title"
+                                placeholderTextColor={C.textMuted}
+                                style={{ flex: 1, color: C.textPrimary, fontSize: 14 }}
+                            />
+                        </View>
 
                         {relatedProperties.length === 0 ? (
-                            <View
-                                style={{
-                                    backgroundColor: C.surface,
-                                    borderRadius: 18,
-                                    padding: 18,
-                                    borderWidth: 1,
-                                    borderColor: C.border,
-                                }}
-                            >
-                                <Text style={{ color: C.textSecondary }}>
-                                    No similar properties found right now.
-                                </Text>
+                            <View style={{ backgroundColor: C.surfaceAlt, borderRadius: 16, padding: 18, alignItems: 'center' }}>
+                                <Text style={{ color: C.textMuted, fontSize: 14 }}>No similar properties found.</Text>
                             </View>
                         ) : (
                             <FlatList
@@ -442,28 +469,26 @@ export default function PropertyDetails() {
                                 keyExtractor={(item) => item.id}
                                 columnWrapperStyle={{ gap: 12 }}
                                 contentContainerStyle={{ gap: 12 }}
-                            renderItem={({ item }) => (
-                                <PropertyCard
-                                    item={item}
-                                    onPress={() => router.push({ pathname: '/property/[id]', params: { id: item.id } })}
-                                    isSaved={saved?.some((savedItem: any) => savedItem.property_id === item.id) ?? false}
-                                    onSave={async () => {
-                                        if (!user?.id) {
-                                            Alert.alert('Sign in required', 'Please sign in to save properties.')
-                                            return
-                                        }
-
-                                        await toggleSave(item.id, saved, refetchSaved, supabase, user.id)
-                                        refetchSaved()
-                                    }}
-
-                                />
-                            )}
-                        />
+                                renderItem={({ item }) => (
+                                    <PropertyCard
+                                        item={item}
+                                        onPress={() => router.push({ pathname: '/property/[id]', params: { id: item.id } })}
+                                        isSaved={saved?.some((s: any) => s.property_id === item.id) ?? false}
+                                        onSave={async () => {
+                                            if (!user?.id) {
+                                                Alert.alert('Sign in required', 'Please sign in to save properties.')
+                                                return
+                                            }
+                                            await toggleSave(item.id, saved, refetchSaved, supabase, user.id)
+                                            refetchSaved()
+                                        }}
+                                    />
+                                )}
+                            />
                         )}
                     </View>
                 </ScrollView>
             </KeyboardAvoidingView>
-        </SafeAreaView>
+        </View>
     )
 }

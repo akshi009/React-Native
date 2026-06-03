@@ -7,14 +7,14 @@ const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1564013799919-ab600027
 
 const C = {
     surface: '#FFFFFF',
-    surfaceAlt: '#EEF0F5',
-    border: '#E2E5EC',
-    accentLight: '#EBF2FF',
-    accentText: '#1D4ED8',
+    surfaceAlt: '#F2F3F5',
+    border: '#EBEBEB',
+    textPrimary: '#111111',
+    textSecondary: '#888888',
+    textMuted: '#AAAAAA',
     danger: '#DC2626',
     dangerLight: '#FEE2E2',
-    textPrimary: '#0F172A',
-    textSecondary: '#64748B',
+    accent: '#111111',
     white: '#FFFFFF',
 }
 
@@ -42,122 +42,109 @@ export function PropertyCard({
 }: PropertyCardProps) {
     const isFeaturedVariant = variant === 'featured'
     const cardWidth = isFeaturedVariant ? SCREEN_WIDTH - 32 : (SCREEN_WIDTH - 44) / 2
-    const imageHeight = isFeaturedVariant ? 182 : 156
+    const imageHeight = isFeaturedVariant ? 220 : 160
 
     return (
         <TouchableOpacity
-            activeOpacity={0.88}
+            activeOpacity={0.92}
             onPress={onPress}
             style={{
                 width: cardWidth,
                 backgroundColor: C.surface,
-                borderRadius: 24,
+                borderRadius: 20,
                 overflow: 'hidden',
                 borderWidth: 1,
-                borderColor: 'rgba(226,229,236,0.9)',
-                shadowColor: '#0F172A',
-                shadowOpacity: 0.06,
-                shadowRadius: 12,
-                shadowOffset: { width: 0, height: 6 },
-                elevation: 2,
+                borderColor: C.border,
             }}
         >
-            <Image
-                source={{ uri: item.images?.[0] || FALLBACK_IMAGE }}
-                style={{ width: '100%', height: imageHeight, backgroundColor: C.surfaceAlt }}
-                resizeMode="cover"
-            />
+            {/* Image */}
+            <View style={{ position: 'relative' }}>
+                <Image
+                    source={{ uri: item.images?.[0] || FALLBACK_IMAGE }}
+                    style={{ width: '100%', height: imageHeight, backgroundColor: C.surfaceAlt }}
+                    resizeMode="cover"
+                />
 
-            {onSave && (
-                <TouchableOpacity
-                    onPress={onSave}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    style={{
-                        position: 'absolute',
-                        top: 10,
-                        right: 10,
-                        width: 32,
-                        height: 32,
-                        borderRadius: 999,
-                        backgroundColor: isSaved ? 'rgba(254,242,242,0.96)' : 'rgba(255,255,255,0.24)',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        borderWidth: 1,
-                        borderColor: isSaved ? 'rgba(220,38,38,0.18)' : 'rgba(255,255,255,0.3)',
-                        zIndex: 20,
-                    }}
-                >
-                    <Ionicons
-                        name={isSaved ? 'heart' : 'heart-outline'}
-                        size={18}
-                        color={isSaved ? C.danger : C.white}
-                    />
-                </TouchableOpacity>
-            )}
+                {/* Save button */}
+                {onSave && (
+                    <TouchableOpacity
+                        onPress={onSave}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        style={{
+                            position: 'absolute',
+                            top: 12,
+                            right: 12,
+                            width: 34,
+                            height: 34,
+                            borderRadius: 999,
+                            backgroundColor: 'rgba(255,255,255,0.90)',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            zIndex: 20,
+                        }}
+                    >
+                        <Ionicons
+                            name={isSaved ? 'heart' : 'heart-outline'}
+                            size={17}
+                            color={isSaved ? C.danger : '#333333'}
+                        />
+                    </TouchableOpacity>
+                )}
 
-            <View
-                style={{
-                    position: 'absolute',
-                    top: 10,
-                    left: 10,
-                    flexDirection: 'row',
-                    gap: 6,
-                    flexWrap: 'wrap',
-                    right: 8,
-                }}
-            >
-                {item.is_featured && (
-                    <View style={{ backgroundColor: C.accentLight, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 }}>
-                        <Text style={{ color: C.accentText, fontSize: 9, fontWeight: '800' }}>Featured</Text>
-                    </View>
-                )}
-                {item.is_sold && (
-                    <View style={{ backgroundColor: C.dangerLight, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 }}>
-                        <Text style={{ color: C.danger, fontSize: 9, fontWeight: '700' }}>Sold</Text>
-                    </View>
-                )}
+                {/* Badges */}
+                <View style={{ position: 'absolute', top: 12, left: 12, flexDirection: 'row', gap: 6 }}>
+                    {item.is_featured && (
+                        <View style={{ backgroundColor: 'rgba(255,255,255,0.92)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 }}>
+                            <Text style={{ color: '#111111', fontSize: 10, fontWeight: '700', letterSpacing: 0.2 }}>Featured</Text>
+                        </View>
+                    )}
+                    {item.is_sold && (
+                        <View style={{ backgroundColor: C.dangerLight, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 }}>
+                            <Text style={{ color: C.danger, fontSize: 10, fontWeight: '700' }}>Sold</Text>
+                        </View>
+                    )}
+                </View>
             </View>
 
-            <View style={{ paddingHorizontal: 12, paddingTop: 10, paddingBottom: 12 }}>
-                <View style={{ flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 4 }}>
-
-                    <Text numberOfLines={2} style={{ color: C.textPrimary, fontSize: 12, fontWeight: '700', lineHeight: 16 }}>
-                        {item.title}
+            {/* Info */}
+            <View style={{ paddingHorizontal: 14, paddingTop: 12, paddingBottom: 14 }}>
+                {item.type ? (
+                    <Text style={{ color: C.textSecondary, fontSize: isFeaturedVariant ? 10 : 8, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 3 }}>
+                        {item.type}
                     </Text>
-                    <View >
-                        <Text style={{ color: C.textPrimary, fontSize: 10, fontWeight: '700', marginVertical: 4 }}>
-                            {item.type[0].toUpperCase() + item.type.slice(1)}
-                        </Text>
-                    </View>
-                </View>
-
-                <Text numberOfLines={1} style={{ color: C.textSecondary, fontSize: 10, marginBottom: 6 }}>
+                ) : null}
+                <Text numberOfLines={1} style={{ color: C.textPrimary, fontSize: isFeaturedVariant ? 15 : 13, fontWeight: '700', marginBottom: 3 }}>
+                    {item.title}
+                </Text>
+                <Text numberOfLines={1} style={{ color: C.textMuted, fontSize: 11, marginBottom: 10 }}>
                     {item.address}, {item.city}
                 </Text>
 
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: 4 }}>
-                    <Text style={{ color: C.accentText, fontSize: 13, fontWeight: '800' }}>
+                {isFeaturedVariant && (
+                    <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+                        {item.bedrooms != null && (
+                            <View style={{ backgroundColor: C.surfaceAlt, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 }}>
+                                <Text style={{ color: C.textSecondary, fontSize: 11, fontWeight: '600' }}>{item.bedrooms} beds</Text>
+                            </View>
+                        )}
+                        {item.bathrooms != null && (
+                            <View style={{ backgroundColor: C.surfaceAlt, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 }}>
+                                <Text style={{ color: C.textSecondary, fontSize: 11, fontWeight: '600' }}>{item.bathrooms} baths</Text>
+                            </View>
+                        )}
+                        {item.area_sqft != null && (
+                            <View style={{ backgroundColor: C.surfaceAlt, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 }}>
+                                <Text style={{ color: C.textSecondary, fontSize: 11, fontWeight: '600' }}>{item.area_sqft} sqft</Text>
+                            </View>
+                        )}
+                    </View>
+                )}
+
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={{ color: C.textPrimary, fontSize: isFeaturedVariant ? 18 : 14, fontWeight: '800' }}>
                         {formatPrice(item.price)}
                     </Text>
                 </View>
-
-                {/* <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 4 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                      
-                        <Text style={{ color: C.textSecondary, fontSize: 10, fontWeight: '700' }}>
-                            {item.bedrooms} beds
-                        </Text>
-                    </View>
-
-                    <View style={{ width: 1, height: 12, backgroundColor: C.border }} />
-
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                       
-                        <Text style={{ color: C.textSecondary, fontSize: 10, fontWeight: '700' }}>
-                            {item.bathrooms} baths
-                        </Text>
-                    </View>
-                </View> */}
             </View>
         </TouchableOpacity>
     )

@@ -354,15 +354,15 @@ export default function Create() {
                     'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80'
                 ]
 
-        const [cityPart = '', ...addrParts] = form.location.split(',').map((s) => s.trim())
+        // const [cityPart = '', ...addrParts] = form.location.split(',').map((s) => s.trim())
 
         const { error } = await supabase.from('properties').insert({
             title: form.title,
             description: form.description,
             price: Number(form.price) || 0,
-            type: selectedType,
-            city: cityPart,
-            address: addrParts.join(', ') || cityPart,
+            type: selectedType.toLowerCase(),
+            // city: cityPart,
+            address: form.location,
             bedrooms: Number(form.bedrooms) || 0,
             bathrooms: Number(form.bathrooms) || 0,
             area_sqft: Number(form.sqft) || 0,

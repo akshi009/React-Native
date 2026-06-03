@@ -66,12 +66,10 @@ function IosTabLayout() {
                 <Label>Search</Label>
             </NativeTabs.Trigger> */}
 
-            {isAdmin &&
-                <NativeTabs.Trigger name="create">
-                    <Icon sf="plus.circle.fill" drawable="custom_settings_drawable" />
-                    <Label>Create</Label>
-                </NativeTabs.Trigger>
-            }
+            <NativeTabs.Trigger name="create">
+                <Icon sf="plus.circle.fill" drawable="custom_settings_drawable" />
+                <Label>Create</Label>
+            </NativeTabs.Trigger>
 
             <NativeTabs.Trigger name="save">
                 <Icon sf="heart.fill" drawable="custom_settings_drawable" />
