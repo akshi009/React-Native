@@ -1,4 +1,5 @@
 import { useAuth, useUser } from '@clerk/expo'
+import { Ionicons } from '@expo/vector-icons'
 import * as ImagePicker from 'expo-image-picker'
 import { useFocusEffect } from 'expo-router'
 import React, { useCallback, useState } from 'react'
@@ -8,6 +9,7 @@ import {
     Dimensions,
     Image,
     KeyboardAvoidingView,
+    Linking,
     Platform,
     ScrollView,
     Text,
@@ -21,24 +23,22 @@ import { createClerkSupabaseClient } from '../../../lib/supabase'
 import { useProductStore } from '../../../store/productStore'
 import { useUserStore } from '../../../store/userStore'
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window')
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window')
 const CARD_WIDTH = (SCREEN_WIDTH - 44) / 2
 
 const C = {
-    bg: '#F5F6FA',
+    bg: '#FFFFFF',
     surface: '#FFFFFF',
-    surfaceAlt: '#EEF0F5',
-    border: '#E2E5EC',
-    accent: '#2563EB',
-    accentLight: '#EBF2FF',
-    accentText: '#1D4ED8',
-    success: '#059669',
+    surfaceAlt: '#F2F3F5',
+    border: '#EBEBEB',
+    textPrimary: '#111111',
+    textSecondary: '#666666',
+    textMuted: '#AAAAAA',
     danger: '#DC2626',
-    dangerLight: '#FEF2F2',
-    textPrimary: '#0F172A',
-    textSecondary: '#64748B',
-    textMuted: '#94A3B8',
+    dangerLight: '#FEE2E2',
+    accent: '#111111',
     white: '#FFFFFF',
+    success: '#059669',
 }
 
 const PROPERTY_TYPES = ['Apartment', 'Villa', 'Plot', 'Commercial', 'Studio', 'Rent']
@@ -158,6 +158,44 @@ export default function Create() {
     const [editForm, setEditForm] = useState<Partial<FormState & { type: string }>>({})
     const [editUploadingImage, setEditUploadingImage] = useState(false)
     const [listingSearch, setListingSearch] = useState('')
+    const [isPaid, setIsPaid] = useState(false)
+    const [ispaymenterror, setIsPaymentError] = useState(false)
+
+    useFocusEffect(
+        useCallback(() => {
+            const fetchErrorStatus = async () => {
+                if (!user?.id) return
+                const { data, error } = await supabase
+                    .from('users')
+                    .select('is_error_payment')
+                    .eq('clerk_id', user.id)
+                    .single()
+
+                if (!error && data) {
+                    setIsPaymentError(!!data)
+                }
+            }
+            fetchErrorStatus()
+        }, [user?.id])
+    )
+
+    useFocusEffect(
+        useCallback(() => {
+            const fetchErrorStatus = async () => {
+                if (!user?.id) return
+                const { data, error } = await supabase
+                    .from('users')
+                    .select('is_payment_open')
+                    .eq('clerk_id', user.id)
+                    .single()
+
+                if (!error && data) {
+                    setIsPaid(!!data)
+                }
+            }
+            fetchErrorStatus()
+        }, [user?.id])
+    )
 
     const pickImages = async () => {
         const permission = await ImagePicker.requestMediaLibraryPermissionsAsync()
@@ -523,16 +561,255 @@ export default function Create() {
         )
     }
 
-    // ── Not admin ──────────────────────────────────────────────────────────
-    if (!isAdmin) {
-        return (
-            <SafeAreaView style={{ flex: 1, backgroundColor: C.bg, justifyContent: 'center', alignItems: 'center' }}>
-                <Text style={{ fontSize: 16, color: C.textSecondary }}>
-                    You are not authorized to manage listings.
-                </Text>
-            </SafeAreaView>
+
+    const handlePayment = async () => {
+        const buttons: Array<{ text: string; style?: 'default' | 'cancel' | 'destructive'; onPress?: () => void }> = []
+        buttons.push({
+            text: 'Google Pay',
+            style: 'default',
+            onPress: () => openPayment('googlepay'),
+        })
+        buttons.push({
+            text: 'PhonePe',
+            style: 'default',
+            onPress: () => openPayment('phonepe'),
+        })
+        buttons.push({
+            text: 'Paytm',
+            style: 'default',
+            onPress: () => openPayment('paytm'),
+        })
+        if (Platform.OS !== 'android') {
+            buttons.push({
+                text: 'Cancel',
+                style: 'cancel',
+            })
+        }
+
+        Alert.alert(
+            'Select Payment Method',
+            'Choose your payment method',
+            buttons,
+            { cancelable: true }
         )
     }
+
+    const openPayment = async (provider: string) => {
+        try {
+            const payeVPA = "8302192353@ptaxis";
+            const payeeName = "kribb";
+            const amount = "199.00";
+            const currency = "INR";
+            const transactionNote = "App Order Payment";
+
+            const queryParams = `pa=${payeVPA}&pn=${encodeURIComponent(payeeName)}&am=${amount}&cu=${currency}&tn=${encodeURIComponent(transactionNote)}`;
+
+
+            let url = '';
+            if (provider === 'googlepay') {
+                url = `tez://upi/pay?${queryParams}`;
+            } else if (provider === 'paytm') {
+                url = `paytmmp://upi/pay?${queryParams}`;
+            } else {
+                url = `upi://pay?${queryParams}`;
+            }
+
+
+            try {
+                const isSupported = await Linking.canOpenURL(url);
+
+                if (isSupported) {
+                    await Linking.openURL(url);
+                    await supabase
+                        .from("users")
+                        .update({ is_payment_open: true })
+                        .eq("clerk_id", user?.id);
+                    setIsPaid(true)
+                } else {
+                    Alert.alert("Error", `${provider} is not installed on this device.`);
+                    setIsPaymentError(true)
+                }
+            } catch (error) {
+                Alert.alert("Error", "An error occurred while opening the payment app.");
+                setIsPaymentError(true)
+            }
+        } catch (error) {
+            Alert.alert("Error", "An error occurred while opening the payment app.");
+        }
+    }
+
+
+    // ── Not admin ──────────────────────────────────────────────────────────
+
+    if (!isAdmin) {
+        return (
+            <View style={{ flex: 1, backgroundColor: '#111', marginBottom: 100 }}>
+                <ScrollView
+                    style={{
+                        flex: 1,
+                        backgroundColor: C.white,
+                        borderTopLeftRadius: 28,
+                        borderTopRightRadius: 28,
+                        marginTop: -24,
+                    }}
+                    contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16, paddingBottom: 52 }}
+                    showsVerticalScrollIndicator={false}
+                >
+                    <View style={{ height: SCREEN_HEIGHT * 0.30, position: 'relative' }}>
+                        <Image
+                            source={{ uri: 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=800&q=80' }}
+                            style={{ width: SCREEN_WIDTH, height: '100%' }}
+                            resizeMode="cover"
+                        />
+                        <View style={{
+                            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                            backgroundColor: 'rgba(0,0,0,0.42)',
+                        }} />
+                        <SafeAreaView style={{ position: 'absolute', bottom: 40, left: 22, right: 22 }}>
+                            <Text style={{ color: '#fff', fontSize: 28, fontWeight: '800', lineHeight: 34, marginBottom: 8, letterSpacing: -0.5 }}>
+                                List your properties.{'\n'}Reach real buyers.
+                            </Text>
+                            <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 14 }}>
+                                Upgrade to Pro and go live today.
+                            </Text>
+                        </SafeAreaView>
+                    </View>
+
+                    {/* Drag handle */}
+                    <View style={{
+                        width: 36, height: 4, borderRadius: 999,
+                        backgroundColor: '#E0E0E0', alignSelf: 'center', marginBottom: 26,
+                    }} />
+
+                    {/* Plan badge */}
+                    <View style={{
+                        flexDirection: 'row', alignItems: 'center', gap: 6,
+                        backgroundColor: C.surfaceAlt, alignSelf: 'flex-start',
+                        borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5, marginBottom: 18,
+                    }}>
+                        <Ionicons name="diamond-outline" size={13} color={C.textPrimary} />
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: C.textPrimary, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                            Pro Plan
+                        </Text>
+                    </View>
+
+                    {/* Price */}
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 5, marginBottom: 8 }}>
+                        <Text style={{ fontSize: 52, fontWeight: '800', color: C.textPrimary, lineHeight: 52, letterSpacing: -1 }}>₹199</Text>
+                    </View>
+                    <Text style={{ fontSize: 14, color: C.textSecondary, marginBottom: 28, lineHeight: 22 }}>
+                        Everything you need to list, manage and sell properties at scale.
+                    </Text>
+
+                    {/* Section label */}
+                    <Text style={{
+                        fontSize: 11, color: C.textMuted, fontWeight: '700',
+                        textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 16,
+                    }}>
+                        What's included
+                    </Text>
+
+                    {/* Features */}
+                    {[
+                        { icon: 'infinite-outline', title: 'Unlimited property listings', sub: 'List as many properties as you want' },
+                        { icon: 'images-outline', title: 'Multiple photos per listing', sub: 'Upload a full image gallery (up to 10)' },
+                        { icon: 'call-outline', title: 'Direct buyer contact', sub: 'WhatsApp, call & email leads' },
+                        { icon: 'location-outline', title: 'All cities & property types', sub: 'Residential, commercial & land' },
+                    ].map((f, i) => (
+                        <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+                            <View style={{
+                                width: 38, height: 38, borderRadius: 12,
+                                backgroundColor: C.surfaceAlt,
+                                alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                            }}>
+                                <Ionicons name={f.icon as any} size={17} color={C.textPrimary} />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 14, fontWeight: '700', color: C.textPrimary, marginBottom: 2 }}>{f.title}</Text>
+                                <Text style={{ fontSize: 12, color: C.textSecondary }}>{f.sub}</Text>
+                            </View>
+                        </View>
+                    ))}
+
+                    {/* Divider */}
+                    <View style={{ borderTopWidth: 0.5, borderColor: C.border, marginVertical: 22 }} />
+
+                    {/* ── Status banners ── */}
+                    {isPaid && (
+                        <View style={{
+                            flexDirection: 'row', alignItems: 'flex-start', gap: 12,
+                            backgroundColor: '#F0FDF4',
+                            borderRadius: 14,
+                            borderWidth: 1,
+                            borderColor: '#BBF7D0',
+                            padding: 14,
+                            marginBottom: 16,
+                        }}>
+                            <Ionicons name="checkmark-circle" size={20} color="#16A34A" style={{ marginTop: 1 }} />
+                            <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 13, fontWeight: '700', color: '#15803D', marginBottom: 3 }}>
+                                    Payment received!
+                                </Text>
+                                <Text style={{ fontSize: 12, color: '#166534', lineHeight: 18 }}>
+                                    Thanks! Your access will be activated within 24–48 hours. We'll notify you once it's live.
+                                </Text>
+                            </View>
+                        </View>
+                    )}
+
+                    {ispaymenterror && (
+                        <View style={{
+                            flexDirection: 'row', alignItems: 'flex-start', gap: 12,
+                            backgroundColor: '#FFF5F5',
+                            borderRadius: 14,
+                            borderWidth: 1,
+                            borderColor: '#FECACA',
+                            padding: 14,
+                            marginBottom: 16,
+                        }}>
+                            <Ionicons name="alert-circle" size={20} color="#DC2626" style={{ marginTop: 1 }} />
+                            <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 13, fontWeight: '700', color: '#B91C1C', marginBottom: 3 }}>
+                                    Something went wrong
+                                </Text>
+                                <Text style={{ fontSize: 12, color: '#991B1B', lineHeight: 18 }}>
+                                    Sorry, we couldn't complete the payment. Please try again or use a different app.
+                                </Text>
+                            </View>
+                        </View>
+                    )}
+
+                    {/* CTA */}
+                    <TouchableOpacity
+                        activeOpacity={0.88}
+                        onPress={handlePayment}
+                        disabled={isPaid}
+                        style={{
+                            backgroundColor: isPaid ? C.surfaceAlt : C.accent,
+                            borderRadius: 16,
+                            paddingVertical: 18,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 9,
+                            opacity: isPaid ? 0.6 : 1,
+                        }}
+                    >
+                        <Text style={{ color: isPaid ? C.textMuted : C.white, fontWeight: '700', fontSize: 15 }}>
+                            {isPaid ? 'Payment sent' : 'Get started for ₹199'}
+                        </Text>
+                        <Ionicons
+                            name={isPaid ? 'checkmark' : 'arrow-forward'}
+                            size={16}
+                            color={isPaid ? C.textMuted : C.white}
+                        />
+                    </TouchableOpacity>
+
+                </ScrollView>
+            </View>
+        )
+    }
+
 
     const owner_property = properties.filter((p: any) => p.owner_email === user?.emailAddresses?.[0]?.emailAddress)
     const filteredOwnerProperties = owner_property.filter((p: any) => {
@@ -1012,7 +1289,7 @@ export default function Create() {
                                                 {[p.address, p.city].filter(Boolean).join(', ')}
                                             </Text>
                                             <View>
-                                                <Text style={{ color: C.accentText, fontSize: 13, fontWeight: '800', marginBottom: 4 }}>
+                                                <Text style={{ color: C.accent, fontSize: 13, fontWeight: '800', marginBottom: 4 }}>
                                                     ₹{p.price.toLocaleString('en-IN')}
                                                 </Text>
                                             </View>
