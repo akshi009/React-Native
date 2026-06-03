@@ -71,6 +71,7 @@ type FormState = {
     sqft: string
     contact_number: string
     owner_email: string
+    city: string
 }
 
 type SelectedImage = {
@@ -90,6 +91,7 @@ const EMPTY_FORM: FormState = {
     sqft: '',
     contact_number: '',
     owner_email: '',
+    city: ''
 }
 
 function Field({
@@ -399,7 +401,7 @@ export default function Create() {
             description: form.description,
             price: Number(form.price) || 0,
             type: selectedType.toLowerCase(),
-            // city: cityPart,
+            city: form.city,
             address: form.location,
             bedrooms: Number(form.bedrooms) || 0,
             bathrooms: Number(form.bathrooms) || 0,
@@ -1042,6 +1044,12 @@ export default function Create() {
                         </View>
 
                         {/* Location */}
+                        <Field
+                            label="City"
+                            value={form.city}
+                            onChangeText={setField('city')}
+                            placeholder="Udaipur"
+                        />
                         <Field
                             label="Location"
                             value={form.location}
