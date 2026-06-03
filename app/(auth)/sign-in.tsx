@@ -1,4 +1,5 @@
-import { useAuth, useSignIn } from '@clerk/expo'
+import { supabase } from '@/lib/supabase'
+import { useAuth, useSignIn, useUser } from '@clerk/expo'
 import { Link, useRouter } from 'expo-router'
 import React, { useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
@@ -11,16 +12,25 @@ const SignIn = () => {
     const { control, handleSubmit, reset } = useForm()
     const { signIn, fetchStatus, errors } = useSignIn()
     const [code, setCode] = useState<any>('')
-    const { isSignedIn } = useAuth()
+    const { isSignedIn, isLoaded } = useAuth()
+    const { user } = useUser()
     const router = useRouter()
     const loading = fetchStatus === "fetching"
     if (signIn.status === 'complete' || isSignedIn) {
         return null
     }
 
+
+
     const onSubmit = async (data: any) => {
         Keyboard.dismiss()
         try {
+            const { error: usererror } = await supabase.from('user').select().eq('email', data.email).single()
+            if (!usererror) {
+                alert("Please create account before logging in")
+                router.replace("/(auth)/sign-up")
+                return
+            }
             const { error } = await signIn?.password({
                 emailAddress: data.email,
                 password: data.password,
