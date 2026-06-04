@@ -246,7 +246,7 @@ const SignIn = () => {
                             <View style={[style.row, { marginTop: 10, alignItems: "center", justifyContent: "center" }]}>
                                 <Text>Still Don't have an account? </Text>
                                 <Link href="/sign-up">
-                                    <Text style={{ color: "#008080", fontWeight: "bold" }}>Sign Up</Text>
+                                    <Text style={{ color: "#020303ff", fontWeight: "bold" }}>Sign Up</Text>
                                 </Link>
                             </View>
                             <View nativeID='clerk-captcha' />
