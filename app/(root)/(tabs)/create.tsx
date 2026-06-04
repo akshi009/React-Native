@@ -172,10 +172,12 @@ export default function Create() {
                     .select('is_error_payment')
                     .eq('clerk_id', user.id)
                     .single()
-
+                console.log(data, "data")
                 if (!error && data) {
-                    setIsPaymentError(!!data)
+                    setIsPaymentError(data.is_error_payment)
                 }
+
+                console.log(ispaymenterror, "ispaymenterror")
             }
             fetchErrorStatus()
         }, [user?.id])
@@ -598,10 +600,10 @@ export default function Create() {
 
     const openPayment = async (provider: string) => {
         try {
-            const payeVPA = "8302192353@ptaxis";
-            const payeeName = "kribb";
-            const amount = "199.00";
-            const currency = "INR";
+            const payeVPA = process.env.EXPO_PAYE_VPA;
+            const payeeName = user?.firstName + " " + user?.lastName;
+            const amount = process.env.EXPO_AMOUNT;
+            const currency = process.env.EXPO_CURRENCY;
             const transactionNote = "App Order Payment";
 
             const queryParams = `pa=${payeVPA}&pn=${encodeURIComponent(payeeName)}&am=${amount}&cu=${currency}&tn=${encodeURIComponent(transactionNote)}`;
@@ -619,7 +621,11 @@ export default function Create() {
 
             try {
                 const isSupported = await Linking.canOpenURL(url);
-
+                console.log(isSupported, "isSupported");
+                console.log(await Linking.canOpenURL("paytmmp://"));
+                console.log(await Linking.canOpenURL("tez://"));
+                console.log(await Linking.canOpenURL("upi://"));
+                console.log(url, "url");
                 if (isSupported) {
                     await Linking.openURL(url);
                     await supabase
@@ -628,7 +634,7 @@ export default function Create() {
                         .eq("clerk_id", user?.id);
                     setIsPaid(true)
                 } else {
-                    Alert.alert("Error", `${provider} is not installed on this device.`);
+                    Alert.alert("Error", `${isSupported} is not installed on this device.`);
                     setIsPaymentError(true)
                 }
             } catch (error) {
@@ -645,7 +651,7 @@ export default function Create() {
 
     if (!isAdmin) {
         return (
-            <View style={{ flex: 1, backgroundColor: '#111', marginBottom: 100 }}>
+            <View style={{ flex: 1, backgroundColor: '#111' }}>
                 <ScrollView
                     style={{
                         flex: 1,
@@ -653,18 +659,20 @@ export default function Create() {
                         borderTopLeftRadius: 28,
                         borderTopRightRadius: 28,
                         marginTop: -24,
+                        paddingHorizontal: 20,
                     }}
-                    contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16, paddingBottom: 52 }}
+                    contentContainerStyle={{ paddingTop: 16, paddingBottom: 52 }}
                     showsVerticalScrollIndicator={false}
                 >
                     <View style={{ height: SCREEN_HEIGHT * 0.30, position: 'relative' }}>
                         <Image
                             source={{ uri: 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=800&q=80' }}
-                            style={{ width: SCREEN_WIDTH, height: '100%' }}
+                            style={{ width: SCREEN_WIDTH, height: '100%', }}
                             resizeMode="cover"
                         />
                         <View style={{
                             position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                            width: SCREEN_WIDTH, height: '100%', zIndex: 1,
                             backgroundColor: 'rgba(0,0,0,0.42)',
                         }} />
                         <SafeAreaView style={{ position: 'absolute', bottom: 40, left: 22, right: 22 }}>
@@ -677,17 +685,62 @@ export default function Create() {
                         </SafeAreaView>
                     </View>
 
+
                     {/* Drag handle */}
                     <View style={{
-                        width: 36, height: 4, borderRadius: 999,
+                        width: 36, height: 4, borderRadius: 999, paddingHorizontal: 20,
                         backgroundColor: '#E0E0E0', alignSelf: 'center', marginBottom: 26,
                     }} />
 
+                    {ispaymenterror && (
+                        <View style={{
+                            flexDirection: 'row', alignItems: 'flex-start', gap: 12,
+                            backgroundColor: '#FFF5F5',
+                            borderRadius: 14,
+                            borderWidth: 1,
+                            borderColor: '#FECACA',
+                            padding: 14,
+                            marginBottom: 16,
+                        }}>
+                            <Ionicons name="alert-circle" size={20} color="#DC2626" style={{ marginTop: 1 }} />
+                            <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 13, fontWeight: '700', color: '#B91C1C', marginBottom: 3 }}>
+                                    Something went wrong
+                                </Text>
+                                <Text style={{ fontSize: 12, color: '#991B1B', lineHeight: 18 }}>
+                                    Sorry, we couldn't complete the payment. Please try again or use a different app.
+                                </Text>
+                            </View>
+                        </View>
+                    )}
+
+                    {isPaid && (
+                        <View style={{
+                            flexDirection: 'row', alignItems: 'flex-start', gap: 12,
+                            backgroundColor: '#F0FDF4',
+                            borderRadius: 14,
+                            borderWidth: 1,
+                            borderColor: '#BBF7D0',
+                            padding: 14,
+                            marginBottom: 16,
+                        }}>
+                            <Ionicons name="checkmark-circle" size={20} color="#16A34A" style={{ marginTop: 1 }} />
+                            <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 13, fontWeight: '700', color: '#15803D', marginBottom: 3 }}>
+                                    Payment received!
+                                </Text>
+                                <Text style={{ fontSize: 12, color: '#166534', lineHeight: 18 }}>
+                                    Thanks! Your access will be activated within 24–48 hours. We'll notify you once it's live.
+                                </Text>
+                            </View>
+                        </View>
+                    )}
+
                     {/* Plan badge */}
                     <View style={{
-                        flexDirection: 'row', alignItems: 'center', gap: 6,
+                        flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 20,
                         backgroundColor: C.surfaceAlt, alignSelf: 'flex-start',
-                        borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5, marginBottom: 18,
+                        borderRadius: 999, paddingVertical: 5, marginBottom: 18,
                     }}>
                         <Ionicons name="diamond-outline" size={13} color={C.textPrimary} />
                         <Text style={{ fontSize: 11, fontWeight: '700', color: C.textPrimary, textTransform: 'uppercase', letterSpacing: 0.5 }}>
@@ -720,7 +773,7 @@ export default function Create() {
                     ].map((f, i) => (
                         <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16 }}>
                             <View style={{
-                                width: 38, height: 38, borderRadius: 12,
+                                width: 38, height: 32, borderRadius: 12,
                                 backgroundColor: C.surfaceAlt,
                                 alignItems: 'center', justifyContent: 'center', flexShrink: 0,
                             }}>
@@ -734,52 +787,12 @@ export default function Create() {
                     ))}
 
                     {/* Divider */}
-                    <View style={{ borderTopWidth: 0.5, borderColor: C.border, marginVertical: 22 }} />
+                    <View style={{ borderTopWidth: 0.5, borderColor: C.border, marginVertical: 10 }} />
 
                     {/* ── Status banners ── */}
-                    {isPaid && (
-                        <View style={{
-                            flexDirection: 'row', alignItems: 'flex-start', gap: 12,
-                            backgroundColor: '#F0FDF4',
-                            borderRadius: 14,
-                            borderWidth: 1,
-                            borderColor: '#BBF7D0',
-                            padding: 14,
-                            marginBottom: 16,
-                        }}>
-                            <Ionicons name="checkmark-circle" size={20} color="#16A34A" style={{ marginTop: 1 }} />
-                            <View style={{ flex: 1 }}>
-                                <Text style={{ fontSize: 13, fontWeight: '700', color: '#15803D', marginBottom: 3 }}>
-                                    Payment received!
-                                </Text>
-                                <Text style={{ fontSize: 12, color: '#166534', lineHeight: 18 }}>
-                                    Thanks! Your access will be activated within 24–48 hours. We'll notify you once it's live.
-                                </Text>
-                            </View>
-                        </View>
-                    )}
 
-                    {ispaymenterror && (
-                        <View style={{
-                            flexDirection: 'row', alignItems: 'flex-start', gap: 12,
-                            backgroundColor: '#FFF5F5',
-                            borderRadius: 14,
-                            borderWidth: 1,
-                            borderColor: '#FECACA',
-                            padding: 14,
-                            marginBottom: 16,
-                        }}>
-                            <Ionicons name="alert-circle" size={20} color="#DC2626" style={{ marginTop: 1 }} />
-                            <View style={{ flex: 1 }}>
-                                <Text style={{ fontSize: 13, fontWeight: '700', color: '#B91C1C', marginBottom: 3 }}>
-                                    Something went wrong
-                                </Text>
-                                <Text style={{ fontSize: 12, color: '#991B1B', lineHeight: 18 }}>
-                                    Sorry, we couldn't complete the payment. Please try again or use a different app.
-                                </Text>
-                            </View>
-                        </View>
-                    )}
+
+
 
                     {/* CTA */}
                     <TouchableOpacity
