@@ -2,10 +2,13 @@ import { useAuth, useUser } from '@clerk/expo'
 import { Ionicons } from '@expo/vector-icons'
 import * as ImagePicker from 'expo-image-picker'
 import { router, useFocusEffect } from 'expo-router'
-import React, { useCallback, useState } from 'react'
+import QRCode from 'qrcode'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
     ActivityIndicator,
     Alert,
+    AppState,
+    AppStateStatus,
     Dimensions,
     Image,
     KeyboardAvoidingView,
@@ -42,6 +45,8 @@ const C = {
 }
 
 const PROPERTY_TYPES = ['Apartment', 'Villa', 'Plot', 'Commercial', 'Studio', 'Rent']
+const OWNER_WHATSAPP = process.env.EXPO_PUBLIC_OWNER_WHATSAPP ?? ''
+const OWNER_EMAIL = process.env.EXPO_PUBLIC_OWNER_EMAIL ?? ''
 
 type Property = {
     id: string
@@ -58,7 +63,6 @@ type Property = {
     contact_number?: string
     owner_email?: string
     is_sold?: boolean
-
 }
 
 type FormState = {
@@ -91,7 +95,7 @@ const EMPTY_FORM: FormState = {
     sqft: '',
     contact_number: '',
     owner_email: '',
-    city: ''
+    city: '',
 }
 
 function Field({
@@ -161,53 +165,156 @@ export default function Create() {
     const [editUploadingImage, setEditUploadingImage] = useState(false)
     const [listingSearch, setListingSearch] = useState('')
     const [isPaid, setIsPaid] = useState(false)
-    const [ispaymenterror, setIsPaymentError] = useState(false)
+
+    // ── QR code modal state ────────────────────────────────────────────────
+    const [showQRModal, setShowQRModal] = useState(false)
+    const [qrCodeDataUrl, setQrCodeDataUrl] = useState('')
+    const [showDoneModal, setShowDoneModal] = useState(false)
+    const appState = useRef<AppStateStatus>(AppState.currentState)
+    const shouldShowDoneModal = useRef(false)
 
     useFocusEffect(
         useCallback(() => {
-            const fetchErrorStatus = async () => {
-                if (!user?.id) return
-                const { data, error } = await supabase
-                    .from('users')
-                    .select('is_error_payment')
-                    .eq('clerk_id', user.id)
-                    .single()
-                console.log(data, "data")
-                if (!error && data) {
-                    setIsPaymentError(data.is_error_payment)
-                }
-
-            }
-            fetchErrorStatus()
-        }, [user?.id])
-    )
-
-    useFocusEffect(
-        useCallback(() => {
-            const fetchErrorStatus = async () => {
+            const fetchPaymentStatus = async () => {
                 if (!user?.id) return
                 const { data, error } = await supabase
                     .from('users')
                     .select('is_payment_open')
                     .eq('clerk_id', user.id)
                     .single()
-
-                if (!error && data) {
-                    setIsPaid(data.is_payment_open)
-                }
+                if (!error && data) setIsPaid(data.is_payment_open)
             }
-            fetchErrorStatus()
+            fetchPaymentStatus()
         }, [user?.id])
     )
 
+    useEffect(() => {
+        if (!showQRModal) return
+
+        const payeeVpa = process.env.EXPO_PUBLIC_PAYE_VPA ?? ''
+        const amount = process.env.EXPO_PUBLIC_AMOUNT ?? '1'
+        const currency = process.env.EXPO_PUBLIC_CURRENCY ?? 'INR'
+        const payerName = user?.firstName ?? user?.emailAddresses?.[0]?.emailAddress ?? 'User'
+        const transactionNote = 'Property app payment'
+
+        const queryParams = [
+            `pa=${payeeVpa}`,
+            `pn=${encodeURIComponent(payerName)}`,
+            `am=${amount}`,
+            `cu=${currency}`,
+            `tn=${encodeURIComponent(transactionNote)}`,
+        ].join('&')
+
+        QRCode.toDataURL(`upi://pay?${queryParams}`, { width: 320, margin: 1 })
+            .then((url: string) => setQrCodeDataUrl(url))
+            .catch(() => setQrCodeDataUrl(''))
+    }, [showQRModal, user?.emailAddresses, user?.firstName])
+
+    useEffect(() => {
+        const sub = AppState.addEventListener('change', (nextState) => {
+            if (
+                appState.current.match(/inactive|background/) &&
+                nextState === 'active' &&
+                shouldShowDoneModal.current
+            ) {
+                shouldShowDoneModal.current = false
+                setShowDoneModal(true)
+            }
+
+            appState.current = nextState
+        })
+
+        return () => sub.remove()
+    }, [])
+
+    // ── Notify owner via WhatsApp & Email ─────────────────────────────────
+    const notifyOwner = async (payerName: string, method: string) => {
+        const message = `New payment received!\nFrom: ${payerName}\nAmount: ₹${process.env.EXPO_PUBLIC_AMOUNT}\nMethod: ${method}\nTime: ${new Date().toLocaleString('en-IN')}`
+        const encodedMessage = encodeURIComponent(message)
+        const phone = OWNER_WHATSAPP.replace(/[^\d]/g, '')
+
+        // WhatsApp notification
+        if (phone) {
+            const waUrls = [
+                `whatsapp://send?phone=${phone}&text=${encodedMessage}`,
+                `https://wa.me/${phone}?text=${encodedMessage}`,
+            ]
+
+            for (const waUrl of waUrls) {
+                try {
+                    await Linking.openURL(waUrl)
+                    return true
+                } catch {
+                    // try next option
+                }
+            }
+        }
+
+        if (OWNER_EMAIL) {
+            const mailUrl = `mailto:${OWNER_EMAIL}?subject=${encodeURIComponent('New Payment Received')}&body=${encodedMessage}`
+            try {
+                await Linking.openURL(mailUrl)
+                return true
+            } catch {
+                // fall through to error below
+            }
+        }
+
+        throw new Error('No owner notification app could be opened.')
+    }
+
+    // ── Mark payment as done in DB ────────────────────────────────────────
+    const savePaymentSuccess = async () => {
+        await supabase
+            .from('users')
+            .update({ is_payment_open: true })
+            .eq('clerk_id', user?.id)
+        setIsPaid(true)
+    }
+
+    // ── Payment method selector ───────────────────────────────────────────
+    const handlePayment = async () => {
+        openQRPayment()
+    }
+
+    // ── QR Code flow ──────────────────────────────────────────────────────
+    const openQRPayment = () => {
+        setShowQRModal(true)
+    }
+
+    const closeQRModal = () => {
+        setShowQRModal(false)
+    }
+
+    const confirmQRPayment = async () => {
+        setShowQRModal(false)
+        shouldShowDoneModal.current = true
+
+        try {
+            await notifyOwner(
+                user?.firstName ?? user?.emailAddresses?.[0]?.emailAddress ?? 'Unknown',
+                'QR Code'
+            )
+        } catch {
+            shouldShowDoneModal.current = false
+            Alert.alert('Error', 'Could not open WhatsApp or email. Please try again.')
+        }
+    }
+
+    const completePaymentAfterReturn = async () => {
+        setShowDoneModal(false)
+        try {
+            await savePaymentSuccess()
+        } catch {
+            Alert.alert('Error', 'Could not save payment status. Please contact support.')
+        }
+    }
+
+    // ── Image picker ───────────────────────────────────────────────────────
     const pickImages = async () => {
         const permission = await ImagePicker.requestMediaLibraryPermissionsAsync()
-
         if (!permission.granted) {
-            Alert.alert(
-                'Permission Required',
-                'Please allow access to your photo library.'
-            )
+            Alert.alert('Permission Required', 'Please allow access to your photo library.')
             return
         }
 
@@ -234,11 +341,7 @@ export default function Create() {
         const uploadSingleImage = async (asset: (typeof result.assets)[number], imageId: string) => {
             if (!asset.base64) {
                 setSelectedImages((prev) =>
-                    prev.map((item) =>
-                        item.id === imageId
-                            ? { ...item, status: 'failed' }
-                            : item
-                    )
+                    prev.map((item) => (item.id === imageId ? { ...item, status: 'failed' } : item))
                 )
                 return
             }
@@ -246,34 +349,22 @@ export default function Create() {
             const filename = `property_${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`
             const buffer = Uint8Array.from(atob(asset.base64), (c) => c.charCodeAt(0))
 
-            const { error } = await supabase.storage
-                .from('property-images')
-                .upload(filename, buffer, {
-                    contentType: 'image/jpeg',
-                    upsert: false,
-                })
+            const { error } = await supabase.storage.from('property-images').upload(filename, buffer, {
+                contentType: 'image/jpeg',
+                upsert: false,
+            })
 
             if (error) {
-                console.log('Upload error:', error)
                 setSelectedImages((prev) =>
-                    prev.map((item) =>
-                        item.id === imageId
-                            ? { ...item, status: 'failed' }
-                            : item
-                    )
+                    prev.map((item) => (item.id === imageId ? { ...item, status: 'failed' } : item))
                 )
                 return
             }
 
-            const { data } = supabase.storage
-                .from('property-images')
-                .getPublicUrl(filename)
-
+            const { data } = supabase.storage.from('property-images').getPublicUrl(filename)
             setSelectedImages((prev) =>
                 prev.map((item) =>
-                    item.id === imageId
-                        ? { ...item, publicUrl: data.publicUrl, status: 'uploaded' }
-                        : item
+                    item.id === imageId ? { ...item, publicUrl: data.publicUrl, status: 'uploaded' } : item
                 )
             )
         }
@@ -282,28 +373,22 @@ export default function Create() {
             await Promise.all(
                 result.assets.map((asset, index) => uploadSingleImage(asset, pickedImages[index].id))
             )
-        } catch (err) {
-            console.log('Image upload error:', err)
+        } catch {
             Alert.alert('Error', 'Failed to upload one or more images.')
         } finally {
             setUploadingImage(false)
         }
     }
 
-    const removeSelectedImage = (imageId: string) => {
+    const removeSelectedImage = (imageId: string) =>
         setSelectedImages((prev) => prev.filter((item) => item.id !== imageId))
-    }
 
     const retrySelectedImage = async (imageId: string) => {
         const image = selectedImages.find((item) => item.id === imageId)
         if (!image) return
 
         setSelectedImages((prev) =>
-            prev.map((item) =>
-                item.id === imageId
-                    ? { ...item, status: 'uploading' }
-                    : item
-            )
+            prev.map((item) => (item.id === imageId ? { ...item, status: 'uploading' } : item))
         )
 
         try {
@@ -313,51 +398,33 @@ export default function Create() {
             const buffer = new Uint8Array(arrayBuffer)
             const filename = `property_${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`
 
-            const { error } = await supabase.storage
-                .from('property-images')
-                .upload(filename, buffer, {
-                    contentType: 'image/jpeg',
-                    upsert: false,
-                })
+            const { error } = await supabase.storage.from('property-images').upload(filename, buffer, {
+                contentType: 'image/jpeg',
+                upsert: false,
+            })
 
             if (error) {
                 setSelectedImages((prev) =>
-                    prev.map((item) =>
-                        item.id === imageId
-                            ? { ...item, status: 'failed' }
-                            : item
-                    )
+                    prev.map((item) => (item.id === imageId ? { ...item, status: 'failed' } : item))
                 )
                 Alert.alert('Upload Failed', error.message)
                 return
             }
 
-            const { data } = supabase.storage
-                .from('property-images')
-                .getPublicUrl(filename)
-
+            const { data } = supabase.storage.from('property-images').getPublicUrl(filename)
             setSelectedImages((prev) =>
                 prev.map((item) =>
-                    item.id === imageId
-                        ? { ...item, publicUrl: data.publicUrl, status: 'uploaded' }
-                        : item
+                    item.id === imageId ? { ...item, publicUrl: data.publicUrl, status: 'uploaded' } : item
                 )
             )
-        } catch (err) {
-            console.log('Retry upload error:', err)
+        } catch {
             setSelectedImages((prev) =>
-                prev.map((item) =>
-                    item.id === imageId
-                        ? { ...item, status: 'failed' }
-                        : item
-                )
+                prev.map((item) => (item.id === imageId ? { ...item, status: 'failed' } : item))
             )
-            return
         }
     }
 
     // ── Fetch all properties ───────────────────────────────────────────────
-
     const properties = useProductStore((state: any) => state.properties ?? [])
 
     useFocusEffect(
@@ -391,11 +458,7 @@ export default function Create() {
         const finalImages =
             imageUrls.length > 0
                 ? imageUrls
-                : [
-                    'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80'
-                ]
-
-        // const [cityPart = '', ...addrParts] = form.location.split(',').map((s) => s.trim())
+                : ['https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80']
 
         const { error } = await supabase.from('properties').insert({
             title: form.title,
@@ -424,7 +487,6 @@ export default function Create() {
         }
     }
 
-
     // ── Start editing ──────────────────────────────────────────────────────
     const startEdit = (p: Property) => {
         setEditingId(p.id)
@@ -440,9 +502,7 @@ export default function Create() {
             sqft: String(p.area_sqft),
             contact_number: p.contact_number ?? '',
             owner_email: p.owner_email ?? '',
-            type: p.type
-                ? p.type.charAt(0).toUpperCase() + p.type.slice(1)
-                : 'Apartment',
+            type: p.type ? p.type.charAt(0).toUpperCase() + p.type.slice(1) : 'Apartment',
         })
     }
 
@@ -469,14 +529,9 @@ export default function Create() {
             contact_number: editForm.contact_number ?? '',
         }
 
-        if (editImage.length > 0) {
-            updatePayload.images = editImage
-        }
+        if (editImage.length > 0) updatePayload.images = editImage
 
-        const { error } = await supabase
-            .from('properties')
-            .update(updatePayload)
-            .eq('id', id)
+        const { error } = await supabase.from('properties').update(updatePayload).eq('id', id)
 
         if (error) {
             Alert.alert('Error', error.message)
@@ -508,48 +563,30 @@ export default function Create() {
     const soldproperty = async (id: any) => {
         if (properties.find((x: any) => x.id === id)?.is_sold === false) {
             await supabase.from('properties').update({ is_sold: true }).eq('id', id)
-            fetchProperty()
-        }
-        else {
+        } else {
             await supabase.from('properties').update({ is_sold: false }).eq('id', id)
-            fetchProperty()
         }
+        fetchProperty()
     }
 
     // ── Menu Options ───────────────────────────────────────────────────────
     const showPropertyMenu = (p: Property) => {
-        const soldButton = p.is_sold === false
-            ? { text: 'Mark as Sold', onPress: () => soldproperty(p.id) }
-            : { text: 'Mark as Unsold', onPress: () => soldproperty(p.id) }
+        const soldButton =
+            p.is_sold === false
+                ? { text: 'Mark as Sold', onPress: () => soldproperty(p.id) }
+                : { text: 'Mark as Unsold', onPress: () => soldproperty(p.id) }
 
         const iosButtons = [
-            {
-                text: 'Cancel',
-                style: 'cancel' as const,
-            },
-            {
-                text: 'Edit Listing',
-                onPress: () => startEdit(p),
-            },
-            {
-                text: 'Delete Listing',
-                style: 'destructive' as const,
-                onPress: () => deleteProperty(p.id),
-            },
+            { text: 'Cancel', style: 'cancel' as const },
+            { text: 'Edit Listing', onPress: () => startEdit(p) },
+            { text: 'Delete Listing', style: 'destructive' as const, onPress: () => deleteProperty(p.id) },
             soldButton,
         ]
 
         const androidButtons = [
-            {
-                text: 'Edit Listing',
-                onPress: () => startEdit(p),
-            },
+            { text: 'Edit Listing', onPress: () => startEdit(p) },
             soldButton,
-            {
-                text: 'Delete Listing',
-                style: 'destructive' as const,
-                onPress: () => deleteProperty(p.id),
-            },
+            { text: 'Delete Listing', style: 'destructive' as const, onPress: () => deleteProperty(p.id) },
         ]
 
         Alert.alert(
@@ -560,91 +597,7 @@ export default function Create() {
         )
     }
 
-
-    const handlePayment = async () => {
-        // router.push(`/payment`)
-        const buttons: Array<{ text: string; style?: 'default' | 'cancel' | 'destructive'; onPress?: () => void }> = []
-        buttons.push({
-            text: 'Google Pay',
-            style: 'default',
-            onPress: () => openPayment('googlepay'),
-        })
-        buttons.push({
-            text: 'Paytm',
-            style: 'default',
-            onPress: () => openPayment('paytm'),
-        })
-        buttons.push({
-            text: 'PhonePe',
-            style: 'default',
-            onPress: () => openPayment('phonepe'),
-        })
-        if (Platform.OS !== 'android') {
-            buttons.push({
-                text: 'Cancel',
-                style: 'cancel',
-            })
-        }
-
-        Alert.alert(
-            'Select Payment Method',
-            'Choose your payment method',
-            buttons,
-            { cancelable: true }
-        )
-    }
-
-    const openPayment = async (provider: string) => {
-        try {
-            const payeVPA = process.env.EXPO_PUBLIC_PAYE_VPA;
-            const payeeName = user?.firstName;
-            const amount = process.env.EXPO_PUBLIC_AMOUNT;
-            const currency = process.env.EXPO_PUBLIC_CURRENCY;
-            const transactionNote = "App Order Payment";
-
-            const queryParams = `pa=${payeVPA}&pn=${payeeName}&am=${amount}&cu=${currency}&tn=${encodeURIComponent(transactionNote)}`;
-
-            let url = '';
-            if (provider === 'googlepay') {
-                url = `tez://upi/pay?${queryParams}`;
-            } else if (provider === 'paytm') {
-                url = `paytmmp://upi/pay?${queryParams}`;
-            } else {
-                url = `phonepe://pay?${queryParams}`;
-            }
-
-            // Try app-specific deep link first, fall back to generic upi://
-            try {
-                await Linking.openURL(url);
-                await supabase
-                    .from("users")
-                    .update({ is_payment_open: true })
-                    .eq("clerk_id", user?.id);
-                setIsPaid(true);
-            } catch {
-                // App not installed — fall back to generic UPI
-                const fallbackUrl = `upi://pay?${queryParams}`;
-                try {
-                    await Linking.openURL(fallbackUrl);
-                    await supabase
-                        .from("users")
-                        .update({ is_payment_open: true })
-                        .eq("clerk_id", user?.id);
-                    setIsPaid(true);
-                } catch {
-                    Alert.alert("Error", "No UPI app found on this device.");
-                    setIsPaymentError(true);
-                }
-            }
-        } catch (error) {
-            Alert.alert("Error", "Something went wrong.");
-            setIsPaymentError(true);
-        }
-    };
-
-
-    // ── Not admin ──────────────────────────────────────────────────────────
-
+    // ── Not admin view ─────────────────────────────────────────────────────
     if (!isAdmin) {
         return (
             <View style={{ flex: 1, backgroundColor: '#111' }}>
@@ -659,109 +612,142 @@ export default function Create() {
                     contentContainerStyle={{ paddingBottom: 120 }}
                     showsVerticalScrollIndicator={false}
                 >
-                    <View style={{ height: SCREEN_HEIGHT * 0.30, position: 'relative', overflow: 'hidden', borderTopLeftRadius: 28, borderTopRightRadius: 28 }}>
+                    <View
+                        style={{
+                            height: SCREEN_HEIGHT * 0.3,
+                            position: 'relative',
+                            overflow: 'hidden',
+                            borderTopLeftRadius: 28,
+                            borderTopRightRadius: 28,
+                        }}
+                    >
                         <Image
                             source={{ uri: 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=800&q=80' }}
                             style={{ width: '100%', height: '100%' }}
                             resizeMode="cover"
                         />
-                        <View style={{
-                            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                            zIndex: 1,
-                            backgroundColor: 'rgba(0,0,0,0.42)',
-                        }} />
+                        <View
+                            style={{
+                                position: 'absolute',
+                                top: 0, left: 0, right: 0, bottom: 0,
+                                zIndex: 1,
+                                backgroundColor: 'rgba(0,0,0,0.42)',
+                            }}
+                        />
                         <SafeAreaView style={{ position: 'absolute', bottom: 24, left: 22, right: 22, zIndex: 2 }}>
-                            <Text style={{ color: '#fff', fontSize: 28, fontWeight: '800', lineHeight: 34, marginBottom: 8, letterSpacing: -0.5 }}>
+                            <Text
+                                style={{
+                                    color: '#fff',
+                                    fontSize: 28,
+                                    fontWeight: '800',
+                                    lineHeight: 34,
+                                    marginBottom: 8,
+                                    letterSpacing: -0.5,
+                                }}
+                            >
                                 List your properties.{'\n'}Reach real buyers.
                             </Text>
-                            {/* <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 14 }}>
-                                Upgrade to Pro and go live today.
-                            </Text> */}
                         </SafeAreaView>
                     </View>
 
-                    {/* ── Content below image ── */}
                     <View style={{ paddingHorizontal: 20, paddingTop: 20 }}>
-
-                        {/* Drag handle */}
-                        <View style={{
-                            width: 36, height: 4, borderRadius: 999,
-                            backgroundColor: '#E0E0E0', alignSelf: 'center', marginBottom: 10,
-                        }} />
-
-                        {ispaymenterror && (
-                            <View style={{
-                                flexDirection: 'row', alignItems: 'flex-start', gap: 12,
-                                backgroundColor: '#FFF5F5',
-                                borderRadius: 14,
-                                borderWidth: 1,
-                                borderColor: '#FECACA',
-                                padding: 14,
-                                marginBottom: 16,
-                            }}>
-                                <Ionicons name="alert-circle" size={20} color="#DC2626" style={{ marginTop: 1 }} />
-                                <View style={{ flex: 1 }}>
-                                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#B91C1C', marginBottom: 3 }}>
-                                        Something went wrong
-                                    </Text>
-                                    <Text style={{ fontSize: 12, color: '#991B1B', lineHeight: 18 }}>
-                                        Sorry, we couldn't complete the payment. Please try again or use a different app.
-                                    </Text>
-                                </View>
-                            </View>
-                        )}
+                        <View
+                            style={{
+                                width: 36,
+                                height: 4,
+                                borderRadius: 999,
+                                backgroundColor: '#E0E0E0',
+                                alignSelf: 'center',
+                                marginBottom: 10,
+                            }}
+                        />
 
                         {isPaid && (
-                            <View style={{
-                                flexDirection: 'row', alignItems: 'flex-start', gap: 12,
-                                backgroundColor: '#F0FDF4',
-                                borderRadius: 14,
-                                borderWidth: 1,
-                                borderColor: '#BBF7D0',
-                                padding: 14,
-                                marginBottom: 16,
-                            }}>
+                            <View
+                                style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'flex-start',
+                                    gap: 12,
+                                    backgroundColor: '#F0FDF4',
+                                    borderRadius: 14,
+                                    borderWidth: 1,
+                                    borderColor: '#BBF7D0',
+                                    padding: 14,
+                                    marginBottom: 16,
+                                }}
+                            >
                                 <Ionicons name="checkmark-circle" size={20} color="#16A34A" style={{ marginTop: 1 }} />
                                 <View style={{ flex: 1 }}>
                                     <Text style={{ fontSize: 13, fontWeight: '700', color: '#15803D', marginBottom: 3 }}>
                                         Payment received!
                                     </Text>
                                     <Text style={{ fontSize: 12, color: '#166534', lineHeight: 18 }}>
-                                        Thanks! Your access will be activated within 24–48 hours. We'll notify you once it's live.
+                                        Thanks! Your access will be activated within 24–48 hours. We'll notify you once
+                                        it's live.
                                     </Text>
                                 </View>
                             </View>
                         )}
 
                         {/* Plan badge */}
-                        <View style={{
-                            flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12,
-                            backgroundColor: C.surfaceAlt, alignSelf: 'flex-start',
-                            borderRadius: 999, paddingVertical: 5, marginBottom: 18,
-                        }}>
+                        <View
+                            style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                gap: 6,
+                                paddingHorizontal: 12,
+                                backgroundColor: C.surfaceAlt,
+                                alignSelf: 'flex-start',
+                                borderRadius: 999,
+                                paddingVertical: 5,
+                                marginBottom: 18,
+                            }}
+                        >
                             <Ionicons name="diamond-outline" size={13} color={C.textPrimary} />
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: C.textPrimary, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                            <Text
+                                style={{
+                                    fontSize: 11,
+                                    fontWeight: '700',
+                                    color: C.textPrimary,
+                                    textTransform: 'uppercase',
+                                    letterSpacing: 0.5,
+                                }}
+                            >
                                 Pro Plan
                             </Text>
                         </View>
 
                         {/* Price */}
                         <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 5, marginBottom: 8 }}>
-                            <Text style={{ fontSize: 52, fontWeight: '800', color: C.textPrimary, lineHeight: 52, letterSpacing: -1 }}>₹{process.env.EXPO_PUBLIC_AMOUNT}</Text>
+                            <Text
+                                style={{
+                                    fontSize: 52,
+                                    fontWeight: '800',
+                                    color: C.textPrimary,
+                                    lineHeight: 52,
+                                    letterSpacing: -1,
+                                }}
+                            >
+                                ₹{process.env.EXPO_PUBLIC_AMOUNT}
+                            </Text>
                         </View>
                         <Text style={{ fontSize: 14, color: C.textSecondary, marginBottom: 28, lineHeight: 22 }}>
                             Everything you need to list, manage and sell properties at scale.
                         </Text>
 
-                        {/* Section label */}
-                        <Text style={{
-                            fontSize: 11, color: C.textMuted, fontWeight: '700',
-                            textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 16,
-                        }}>
+                        <Text
+                            style={{
+                                fontSize: 11,
+                                color: C.textMuted,
+                                fontWeight: '700',
+                                textTransform: 'uppercase',
+                                letterSpacing: 0.6,
+                                marginBottom: 16,
+                            }}
+                        >
                             What's included
                         </Text>
 
-                        {/* Features */}
                         {[
                             { icon: 'infinite-outline', title: 'Unlimited property listings', sub: 'List as many properties as you want' },
                             { icon: 'images-outline', title: 'Multiple photos per listing', sub: 'Upload a full image gallery (up to 10)' },
@@ -769,24 +755,30 @@ export default function Create() {
                             { icon: 'location-outline', title: 'All cities & property types', sub: 'Residential, commercial & land' },
                         ].map((f, i) => (
                             <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-                                <View style={{
-                                    width: 38, height: 38, borderRadius: 12,
-                                    backgroundColor: C.surfaceAlt,
-                                    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                                }}>
+                                <View
+                                    style={{
+                                        width: 38,
+                                        height: 38,
+                                        borderRadius: 12,
+                                        backgroundColor: C.surfaceAlt,
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        flexShrink: 0,
+                                    }}
+                                >
                                     <Ionicons name={f.icon as any} size={17} color={C.textPrimary} />
                                 </View>
                                 <View style={{ flex: 1 }}>
-                                    <Text style={{ fontSize: 14, fontWeight: '700', color: C.textPrimary, marginBottom: 2 }}>{f.title}</Text>
+                                    <Text style={{ fontSize: 14, fontWeight: '700', color: C.textPrimary, marginBottom: 2 }}>
+                                        {f.title}
+                                    </Text>
                                     <Text style={{ fontSize: 12, color: C.textSecondary }}>{f.sub}</Text>
                                 </View>
                             </View>
                         ))}
 
-                        {/* Divider */}
                         <View style={{ borderTopWidth: 0.5, borderColor: C.border, marginVertical: 10 }} />
 
-                        {/* CTA */}
                         <TouchableOpacity
                             activeOpacity={0.88}
                             onPress={handlePayment}
@@ -811,19 +803,230 @@ export default function Create() {
                                 color={isPaid ? C.textMuted : C.white}
                             />
                         </TouchableOpacity>
-
                     </View>
                 </ScrollView>
+
+                {/* ── QR Code Modal ── */}
+                {showQRModal && (
+                    <View
+                        style={{
+                            position: 'absolute',
+                            top: 0, left: 0, right: 0, bottom: 0,
+                            backgroundColor: 'rgba(0,0,0,0.6)',
+                            zIndex: 999,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                        }}
+                    >
+                        <View
+                            style={{
+                                backgroundColor: C.white,
+                                borderRadius: 24,
+                                padding: 24,
+                                marginHorizontal: 24,
+                                alignItems: 'center',
+                                gap: 16,
+                                width: SCREEN_WIDTH - 48,
+                            }}
+                        >
+                            <Text style={{ fontSize: 17, fontWeight: '800', color: C.textPrimary }}>
+                                Scan to Pay
+                            </Text>
+                            <Text style={{ fontSize: 13, color: C.textSecondary, textAlign: 'center' }}>
+                                Scan the QR code using any UPI app (Google Pay, PhonePe, Paytm) to pay ₹{process.env.EXPO_PUBLIC_AMOUNT}
+                            </Text>
+
+                            {/* QR Code Image */}
+                            {/* {qrCodeDataUrl ? ( */}
+                            <Image
+                                source={require('../../../assets/images/paymentQr.jpeg')}
+                                // source={{ uri: qrCodeDataUrl }}
+                                style={{
+                                    width: 220,
+                                    height: 220,
+                                    borderRadius: 16,
+                                    backgroundColor: C.surfaceAlt,
+                                }}
+                                resizeMode="cover"
+                            />
+                            {/* ) : (
+                                <View
+                                    style={{
+                                        width: 220,
+                                        height: 220,
+                                        borderRadius: 16,
+                                        backgroundColor: C.surfaceAlt,
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        borderWidth: 1,
+                                        borderColor: C.border,
+                                        borderStyle: 'dashed',
+                                    }}
+                                >
+                                    <Ionicons name="qr-code-outline" size={64} color={C.textMuted} />
+                                    <Text style={{ fontSize: 12, color: C.textMuted, marginTop: 8, textAlign: 'center', paddingHorizontal: 16 }}>
+                                        Generating QR code...
+                                    </Text>
+                                </View>
+                            )} */}
+
+                            <View style={{ backgroundColor: C.surfaceAlt, borderRadius: 12, padding: 12, width: '100%' }}>
+                                <Text style={{ fontSize: 12, color: C.textSecondary, textAlign: 'center', lineHeight: 18 }}>
+                                    After completing the payment, tap "I've Paid" below to confirm.
+                                </Text>
+                            </View>
+
+                            {/* Buttons */}
+                            <View style={{ flexDirection: 'row', gap: 10, width: '100%' }}>
+                                <TouchableOpacity
+                                    activeOpacity={0.8}
+                                    onPress={closeQRModal}
+                                    style={{
+                                        flex: 1,
+                                        backgroundColor: C.surfaceAlt,
+                                        height: 48,
+                                        borderRadius: 14,
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        borderWidth: 1,
+                                        borderColor: C.border,
+                                    }}
+                                >
+                                    <Text style={{ fontSize: 14, fontWeight: '700', color: C.textSecondary }}>
+                                        Cancel
+                                    </Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    activeOpacity={0.88}
+                                    onPress={confirmQRPayment}
+                                    style={{
+                                        flex: 2,
+                                        backgroundColor: C.accent,
+                                        height: 48,
+                                        borderRadius: 14,
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        flexDirection: 'row',
+                                        gap: 6,
+                                    }}
+                                >
+                                    <Ionicons name="checkmark-circle-outline" size={18} color={C.white} />
+                                    <Text style={{ fontSize: 14, fontWeight: '800', color: C.white }}>
+                                        I've Paid
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                )}
+
+                {showDoneModal && (
+                    <View
+                        style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            backgroundColor: 'rgba(0,0,0,0.6)',
+                            zIndex: 1000,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            paddingHorizontal: 24,
+                        }}
+                    >
+                        <View
+                            style={{
+                                width: '100%',
+                                maxWidth: 340,
+                                backgroundColor: C.white,
+                                borderRadius: 22,
+                                padding: 24,
+                                alignItems: 'center',
+                                gap: 14,
+                            }}
+                        >
+                            <View
+                                style={{
+                                    width: 64,
+                                    height: 64,
+                                    borderRadius: 32,
+                                    backgroundColor: '#F0FDF4',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                }}
+                            >
+                                <Ionicons name="checkmark-circle" size={34} color={C.success} />
+                            </View>
+                            <Text style={{ fontSize: 18, fontWeight: '800', color: C.textPrimary }}>
+                                Payment Done ?
+                            </Text>
+                            <Text style={{ fontSize: 13, color: C.textSecondary, textAlign: 'center', lineHeight: 20 }}>
+                                If Payment is Done Successfully, then you can tap Done. So That after 24-48hrs your status get Updated.
+                            </Text>
+                            <Text style={{ fontSize: 12, color: C.textMuted, textAlign: 'center', lineHeight: 18 }}>
+                                Otherwise Contact the Admin For more details.
+                            </Text>
+                            <Text onPress={() => Linking.openURL(`mailto:${OWNER_EMAIL}`)} style={{ fontSize: 12, color: C.success, textAlign: 'center', lineHeight: 18, textDecorationLine: 'underline', textDecorationColor: C.success, textDecorationStyle: 'solid' }}>
+                                Mail at : {OWNER_EMAIL || 'the admin email'}
+                            </Text>
+
+                            <View style={{ flexDirection: 'row', gap: 10, width: '100%' }}>
+                                <TouchableOpacity
+                                    activeOpacity={0.8}
+                                    onPress={() => {
+                                        shouldShowDoneModal.current = false
+                                        setShowDoneModal(false)
+                                    }}
+                                    style={{
+                                        flex: 1,
+                                        height: 48,
+                                        borderRadius: 14,
+                                        borderWidth: 1,
+                                        borderColor: C.border,
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        backgroundColor: C.surfaceAlt,
+                                    }}
+                                >
+                                    <Text style={{ fontSize: 14, fontWeight: '700', color: C.textSecondary }}>
+                                        Cancel
+                                    </Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    activeOpacity={0.88}
+                                    onPress={completePaymentAfterReturn}
+                                    style={{
+                                        flex: 2,
+                                        height: 48,
+                                        borderRadius: 14,
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        backgroundColor: C.accent,
+                                    }}
+                                >
+                                    <Text style={{ fontSize: 14, fontWeight: '800', color: C.white }}>
+                                        Done
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                )}
+
             </View>
         )
     }
 
-
-    const owner_property = properties.filter((p: any) => p.owner_email === user?.emailAddresses?.[0]?.emailAddress)
+    // ── Admin view ─────────────────────────────────────────────────────────
+    const owner_property = properties.filter(
+        (p: any) => p.owner_email === user?.emailAddresses?.[0]?.emailAddress
+    )
     const filteredOwnerProperties = owner_property.filter((p: any) => {
         const query = listingSearch.trim().toLowerCase()
         if (!query) return true
-
         return (
             p.title?.toLowerCase().includes(query) ||
             p.city?.toLowerCase().includes(query) ||
@@ -836,40 +1039,34 @@ export default function Create() {
         <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
             <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
                 <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 60 }}>
-
                     {/* ── Header ── */}
                     <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20 }}>
-                        <Text style={{ fontSize: 26, fontWeight: '800', color: C.textPrimary }}>
-                            Admin Panel
-                        </Text>
+                        <Text style={{ fontSize: 26, fontWeight: '800', color: C.textPrimary }}>Admin Panel</Text>
                         <Text style={{ color: C.textMuted, marginTop: 4, fontSize: 13 }}>
                             Publish and manage property listings
                         </Text>
                     </View>
 
-                    {/* ══════════════════════════════════════════
-                        CREATE FORM
-                    ══════════════════════════════════════════ */}
-                    <View style={{
-                        marginHorizontal: 16,
-                        backgroundColor: C.surface,
-                        borderRadius: 20,
-                        padding: 18,
-                        borderWidth: 1,
-                        borderColor: C.border,
-                        marginBottom: 24,
-                        gap: 14,
-                    }}>
-                        <Text style={{ fontSize: 14, fontWeight: '700', color: C.textPrimary }}>
-                            New listing
-                        </Text>
+                    {/* ── Create Form ── */}
+                    <View
+                        style={{
+                            marginHorizontal: 16,
+                            backgroundColor: C.surface,
+                            borderRadius: 20,
+                            padding: 18,
+                            borderWidth: 1,
+                            borderColor: C.border,
+                            marginBottom: 24,
+                            gap: 14,
+                        }}
+                    >
+                        <Text style={{ fontSize: 14, fontWeight: '700', color: C.textPrimary }}>New listing</Text>
 
                         {/* Image Uploader */}
                         <View style={{ marginBottom: 6 }}>
                             <Text style={{ marginBottom: 8, color: C.textPrimary, fontWeight: '700', fontSize: 13 }}>
                                 Property photos
                             </Text>
-
                             <TouchableOpacity
                                 activeOpacity={0.8}
                                 onPress={pickImages}
@@ -891,9 +1088,7 @@ export default function Create() {
                                 <Text style={{ fontSize: 13, color: C.textSecondary, fontWeight: '700' }}>
                                     Add Property Photos
                                 </Text>
-                                <Text style={{ fontSize: 11, color: C.textMuted }}>
-                                    Select up to 10 PNG/JPG images
-                                </Text>
+                                <Text style={{ fontSize: 11, color: C.textMuted }}>Select up to 10 PNG/JPG images</Text>
                             </TouchableOpacity>
 
                             {selectedImages.length > 0 && (
@@ -916,12 +1111,14 @@ export default function Create() {
                                                 resizeMode="cover"
                                             />
                                             {image.status === 'uploading' && (
-                                                <View style={{
-                                                    ...StyleSheet_absoluteFill,
-                                                    backgroundColor: 'rgba(0,0,0,0.45)',
-                                                    alignItems: 'center',
-                                                    justifyContent: 'center',
-                                                }}>
+                                                <View
+                                                    style={{
+                                                        ...StyleSheet_absoluteFill,
+                                                        backgroundColor: 'rgba(0,0,0,0.45)',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                    }}
+                                                >
                                                     <ActivityIndicator color={C.white} size="small" />
                                                     <Text style={{ color: C.white, marginTop: 6, fontSize: 11, fontWeight: '600' }}>
                                                         Uploading...
@@ -929,30 +1126,32 @@ export default function Create() {
                                                 </View>
                                             )}
                                             {image.status === 'uploaded' && (
-                                                <View style={{
-                                                    position: 'absolute',
-                                                    top: 8,
-                                                    left: 8,
-                                                    backgroundColor: C.success,
-                                                    paddingHorizontal: 8,
-                                                    paddingVertical: 4,
-                                                    borderRadius: 999,
-                                                }}>
+                                                <View
+                                                    style={{
+                                                        position: 'absolute',
+                                                        top: 8, left: 8,
+                                                        backgroundColor: C.success,
+                                                        paddingHorizontal: 8,
+                                                        paddingVertical: 4,
+                                                        borderRadius: 999,
+                                                    }}
+                                                >
                                                     <Text style={{ color: C.white, fontSize: 11, fontWeight: '700' }}>
                                                         ✓ Uploaded
                                                     </Text>
                                                 </View>
                                             )}
                                             {image.status === 'failed' && (
-                                                <View style={{
-                                                    position: 'absolute',
-                                                    top: 8,
-                                                    left: 8,
-                                                    backgroundColor: C.danger,
-                                                    paddingHorizontal: 8,
-                                                    paddingVertical: 4,
-                                                    borderRadius: 999,
-                                                }}>
+                                                <View
+                                                    style={{
+                                                        position: 'absolute',
+                                                        top: 8, left: 8,
+                                                        backgroundColor: C.danger,
+                                                        paddingHorizontal: 8,
+                                                        paddingVertical: 4,
+                                                        borderRadius: 999,
+                                                    }}
+                                                >
                                                     <Text style={{ color: C.white, fontSize: 11, fontWeight: '700' }}>
                                                         Failed
                                                     </Text>
@@ -963,11 +1162,9 @@ export default function Create() {
                                                 onPress={() => removeSelectedImage(image.id)}
                                                 style={{
                                                     position: 'absolute',
-                                                    top: 8,
-                                                    right: 8,
+                                                    top: 8, right: 8,
                                                     backgroundColor: 'rgba(15,23,42,0.65)',
-                                                    width: 32,
-                                                    height: 32,
+                                                    width: 32, height: 32,
                                                     borderRadius: 16,
                                                     alignItems: 'center',
                                                     justifyContent: 'center',
@@ -981,17 +1178,14 @@ export default function Create() {
                                                     onPress={() => retrySelectedImage(image.id)}
                                                     style={{
                                                         position: 'absolute',
-                                                        bottom: 8,
-                                                        left: 8,
+                                                        bottom: 8, left: 8,
                                                         backgroundColor: 'rgba(37,99,235,0.9)',
                                                         paddingHorizontal: 10,
                                                         paddingVertical: 5,
                                                         borderRadius: 999,
                                                     }}
                                                 >
-                                                    <Text style={{ color: C.white, fontSize: 11, fontWeight: '700' }}>
-                                                        Retry
-                                                    </Text>
+                                                    <Text style={{ color: C.white, fontSize: 11, fontWeight: '700' }}>Retry</Text>
                                                 </TouchableOpacity>
                                             )}
                                         </View>
@@ -1000,24 +1194,9 @@ export default function Create() {
                             )}
                         </View>
 
-                        {/* Title */}
-                        <Field
-                            label="Property title"
-                            value={form.title}
-                            onChangeText={setField('title')}
-                            placeholder="Modern Villa with Garden"
-                        />
+                        <Field label="Property title" value={form.title} onChangeText={setField('title')} placeholder="Modern Villa with Garden" />
+                        <Field label="Price (₹)" value={form.price} onChangeText={setField('price')} placeholder="4500000" numeric />
 
-                        {/* Price */}
-                        <Field
-                            label="Price (₹)"
-                            value={form.price}
-                            onChangeText={setField('price')}
-                            placeholder="4500000"
-                            numeric
-                        />
-
-                        {/* Property Type */}
                         <View>
                             <Text style={{ marginBottom: 8, color: C.textPrimary, fontWeight: '700', fontSize: 13 }}>
                                 Property type
@@ -1037,11 +1216,13 @@ export default function Create() {
                                             borderColor: selectedType === item ? C.accent : C.border,
                                         }}
                                     >
-                                        <Text style={{
-                                            color: selectedType === item ? C.white : C.textSecondary,
-                                            fontWeight: '700',
-                                            fontSize: 13,
-                                        }}>
+                                        <Text
+                                            style={{
+                                                color: selectedType === item ? C.white : C.textSecondary,
+                                                fontWeight: '700',
+                                                fontSize: 13,
+                                            }}
+                                        >
                                             {item}
                                         </Text>
                                     </TouchableOpacity>
@@ -1049,45 +1230,18 @@ export default function Create() {
                             </ScrollView>
                         </View>
 
-                        {/* Location */}
-                        <Field
-                            label="City"
-                            value={form.city}
-                            onChangeText={setField('city')}
-                            placeholder="Udaipur"
-                        />
-                        <Field
-                            label="Address"
-                            value={form.location}
-                            onChangeText={setField('location')}
-                            placeholder="Udaipur, Rajasthan"
-                        />
+                        <Field label="City" value={form.city} onChangeText={setField('city')} placeholder="Udaipur" />
+                        <Field label="Address" value={form.location} onChangeText={setField('location')} placeholder="Udaipur, Rajasthan" />
 
-                        {/* Beds / Baths / Sqft */}
                         <View style={{ flexDirection: 'row', gap: 10 }}>
                             <Field label="Bedrooms" value={form.bedrooms} onChangeText={setField('bedrooms')} placeholder="3" numeric />
                             <Field label="Bathrooms" value={form.bathrooms} onChangeText={setField('bathrooms')} placeholder="2" numeric />
                             <Field label="Sqft" value={form.sqft} onChangeText={setField('sqft')} placeholder="1200" numeric />
                         </View>
 
-                        {/* Description */}
-                        <Field
-                            label="Description"
-                            value={form.description}
-                            onChangeText={setField('description')}
-                            placeholder="Describe your property..."
-                            multiline
-                        />
+                        <Field label="Description" value={form.description} onChangeText={setField('description')} placeholder="Describe your property..." multiline />
+                        <Field label="Owner Contact Number" value={form.contact_number} onChangeText={setField('contact_number')} placeholder="0987654321" numeric />
 
-                        <Field
-                            label="Owner Contact Number"
-                            value={form.contact_number}
-                            onChangeText={setField('contact_number')}
-                            placeholder="0987654321"
-                            numeric
-                        />
-
-                        {/* Submit */}
                         <TouchableOpacity
                             activeOpacity={0.85}
                             onPress={onPublish}
@@ -1105,24 +1259,26 @@ export default function Create() {
                             {publishing ? (
                                 <ActivityIndicator color={C.white} />
                             ) : (
-                                <Text style={{ color: C.white, fontSize: 15, fontWeight: '800' }}>
-                                    Publish Property
-                                </Text>
+                                <Text style={{ color: C.white, fontSize: 15, fontWeight: '800' }}>Publish Property</Text>
                             )}
                         </TouchableOpacity>
                     </View>
 
-                    {/* ══════════════════════════════════════════
-                        LISTINGS
-                    ══════════════════════════════════════════ */}
+                    {/* ── Listings ── */}
                     <View style={{ paddingHorizontal: 16 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                            <Text style={{ fontSize: 14, fontWeight: '700', color: C.textPrimary }}>
-                                All listings
-                            </Text>
+                        <View
+                            style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                marginBottom: 12,
+                            }}
+                        >
+                            <Text style={{ fontSize: 14, fontWeight: '700', color: C.textPrimary }}>All listings</Text>
                             {!loading && (
                                 <Text style={{ fontSize: 12, color: C.textMuted }}>
-                                    {filteredOwnerProperties?.length} {filteredOwnerProperties?.length === 1 ? 'property' : 'properties'}
+                                    {filteredOwnerProperties?.length}{' '}
+                                    {filteredOwnerProperties?.length === 1 ? 'property' : 'properties'}
                                 </Text>
                             )}
                         </View>
@@ -1154,17 +1310,14 @@ export default function Create() {
                                     activeOpacity={0.8}
                                     onPress={() => setListingSearch('')}
                                     style={{
-                                        width: 24,
-                                        height: 24,
+                                        width: 24, height: 24,
                                         borderRadius: 999,
                                         backgroundColor: C.surfaceAlt,
                                         alignItems: 'center',
                                         justifyContent: 'center',
                                     }}
                                 >
-                                    <Text style={{ color: C.textSecondary, fontSize: 14, fontWeight: '800' }}>
-                                        ×
-                                    </Text>
+                                    <Text style={{ color: C.textSecondary, fontSize: 14, fontWeight: '800' }}>×</Text>
                                 </TouchableOpacity>
                             )}
                         </View>
@@ -1172,26 +1325,30 @@ export default function Create() {
                         {loading ? (
                             <ActivityIndicator color={C.accent} style={{ marginTop: 24 }} />
                         ) : properties.length === 0 ? (
-                            <View style={{
-                                backgroundColor: C.surface,
-                                borderRadius: 16,
-                                padding: 32,
-                                alignItems: 'center',
-                                borderWidth: 1,
-                                borderColor: C.border,
-                            }}>
+                            <View
+                                style={{
+                                    backgroundColor: C.surface,
+                                    borderRadius: 16,
+                                    padding: 32,
+                                    alignItems: 'center',
+                                    borderWidth: 1,
+                                    borderColor: C.border,
+                                }}
+                            >
                                 <Text style={{ fontSize: 32, marginBottom: 8 }}>🏘️</Text>
                                 <Text style={{ color: C.textMuted, fontSize: 14 }}>No listings yet</Text>
                             </View>
                         ) : filteredOwnerProperties.length === 0 ? (
-                            <View style={{
-                                backgroundColor: C.surface,
-                                borderRadius: 16,
-                                padding: 24,
-                                alignItems: 'center',
-                                borderWidth: 1,
-                                borderColor: C.border,
-                            }}>
+                            <View
+                                style={{
+                                    backgroundColor: C.surface,
+                                    borderRadius: 16,
+                                    padding: 24,
+                                    alignItems: 'center',
+                                    borderWidth: 1,
+                                    borderColor: C.border,
+                                }}
+                            >
                                 <Text style={{ fontSize: 28, marginBottom: 8 }}>🔎</Text>
                                 <Text style={{ color: C.textPrimary, fontSize: 14, fontWeight: '700', marginBottom: 4 }}>
                                     No matching listings
@@ -1219,10 +1376,7 @@ export default function Create() {
                                             elevation: 2,
                                         }}
                                     >
-                                        {/* Property summary row */}
                                         <View style={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 12 }}>
-
-
                                             <View
                                                 style={{
                                                     flexDirection: 'row',
@@ -1248,34 +1402,23 @@ export default function Create() {
                                                 ) : (
                                                     <View style={{ flex: 1 }} />
                                                 )}
-
-                                                <TouchableOpacity
-                                                    activeOpacity={0.7}
-                                                    onPress={() => showPropertyMenu(p)}
-                                                // style={{
-                                                //     width: 32,
-                                                //     height: 32,
-                                                //     borderRadius: 999,
-                                                //     backgroundColor: C.surfaceAlt,
-                                                //     alignItems: 'center',
-                                                //     justifyContent: 'center',
-                                                // }}
-                                                >
-                                                    <Text
-                                                        style={{
-                                                            fontSize: 16,
-                                                            color: C.textSecondary,
-                                                            fontWeight: '900',
-                                                        }}
-                                                    >
+                                                <TouchableOpacity activeOpacity={0.7} onPress={() => showPropertyMenu(p)}>
+                                                    <Text style={{ fontSize: 16, color: C.textSecondary, fontWeight: '900' }}>
                                                         •••
                                                     </Text>
                                                 </TouchableOpacity>
                                             </View>
-                                            <TouchableOpacity onPress={() => router.push({ pathname: '/property/[id]', params: { id: p.id } })}>
 
+                                            <TouchableOpacity
+                                                onPress={() => router.push({ pathname: '/property/[id]', params: { id: p.id } })}
+                                            >
                                                 <Image
-                                                    source={{ uri: (p.images && p.images.length > 0) ? p.images[0] : 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80' }}
+                                                    source={{
+                                                        uri:
+                                                            p.images && p.images.length > 0
+                                                                ? p.images[0]
+                                                                : 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80',
+                                                    }}
                                                     style={{
                                                         width: '100%',
                                                         height: 156,
@@ -1285,75 +1428,45 @@ export default function Create() {
                                                     }}
                                                     resizeMode="cover"
                                                 />
-
                                                 <View style={{ marginBottom: 4 }}>
-                                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 4 }}>
-                                                        <View style={{ flex: 1 }}>
-
-                                                            <Text numberOfLines={2} style={{ fontSize: 12, fontWeight: '700', color: C.textPrimary, lineHeight: 16 }}>
-                                                                {p.title}
-                                                            </Text>
-                                                        </View>
-                                                    </View>
-                                                    <View>
-                                                        <Text style={{ fontSize: 10, fontWeight: '700', color: C.textPrimary }}>
-                                                            {p.type[0].toUpperCase() + p.type.slice(1)}
-                                                        </Text>
-                                                    </View>
+                                                    <Text numberOfLines={2} style={{ fontSize: 12, fontWeight: '700', color: C.textPrimary, lineHeight: 16, marginBottom: 4 }}>
+                                                        {p.title}
+                                                    </Text>
+                                                    <Text style={{ fontSize: 10, fontWeight: '700', color: C.textPrimary }}>
+                                                        {p.type[0].toUpperCase() + p.type.slice(1)}
+                                                    </Text>
                                                 </View>
                                             </TouchableOpacity>
                                             <Text numberOfLines={1} style={{ fontSize: 11, color: C.textSecondary, marginBottom: 8 }}>
                                                 {[p.address, p.city].filter(Boolean).join(', ')}
                                             </Text>
-                                            <View>
-                                                <Text style={{ color: C.accent, fontSize: 13, fontWeight: '800', marginBottom: 4 }}>
-                                                    ₹{p.price.toLocaleString('en-IN')}
-                                                </Text>
-                                            </View>
-
-                                            {/* <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 2 }}>
-                                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                                                    <Text style={{ color: C.textSecondary, fontSize: 10, fontWeight: '700' }}>
-                                                        {p.bedrooms} beds
-                                                    </Text>
-                                                </View>
-
-                                                <View style={{ width: 1, height: 12, backgroundColor: C.border }} />
-
-                                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                                                    <Text style={{ color: C.textSecondary, fontSize: 10, fontWeight: '700' }}>
-                                                        {p.bathrooms} baths
-                                                    </Text>
-                                                </View>
-                                            </View> */}
+                                            <Text style={{ color: C.accent, fontSize: 13, fontWeight: '800', marginBottom: 4 }}>
+                                                ₹{p.price.toLocaleString('en-IN')}
+                                            </Text>
                                         </View>
-
 
                                         {/* ── Inline edit panel ── */}
                                         {editingId === p.id && (
-                                            <View style={{
-                                                backgroundColor: C.surfaceAlt,
-                                                borderTopWidth: 1,
-                                                borderTopColor: C.border,
-                                                padding: 16,
-                                                gap: 12,
-                                            }}>
+                                            <View
+                                                style={{
+                                                    backgroundColor: C.surfaceAlt,
+                                                    borderTopWidth: 1,
+                                                    borderTopColor: C.border,
+                                                    padding: 16,
+                                                    gap: 12,
+                                                }}
+                                            >
                                                 <Text style={{ fontSize: 13, fontWeight: '700', color: C.textPrimary, marginBottom: 2 }}>
                                                     Edit listing
                                                 </Text>
 
                                                 <Field label="Title" value={editForm.title ?? ''} onChangeText={setEditField('title')} placeholder="Property title" />
                                                 <Field label="Price (₹)" value={editForm.price ?? ''} onChangeText={setEditField('price')} placeholder="4500000" numeric />
+
                                                 <View>
-                                                    <Text style={{
-                                                        marginBottom: 8,
-                                                        color: C.textPrimary,
-                                                        fontWeight: '700',
-                                                        fontSize: 13,
-                                                    }}>
+                                                    <Text style={{ marginBottom: 8, color: C.textPrimary, fontWeight: '700', fontSize: 13 }}>
                                                         Property photo
                                                     </Text>
-
                                                     <View style={{ position: 'relative' }}>
                                                         <TouchableOpacity
                                                             activeOpacity={0.8}
@@ -1364,193 +1477,68 @@ export default function Create() {
                                                                     selectionLimit: 10,
                                                                     quality: 0.8,
                                                                     base64: true,
-
                                                                 })
-
                                                                 if (result.canceled || !result.assets?.length) return
-
                                                                 setEditUploadingImage(true)
-
                                                                 try {
                                                                     const uploadedUrls: string[] = []
-
                                                                     for (const asset of result.assets) {
                                                                         if (!asset.base64) continue
-
-                                                                        const filename = `property_${Date.now()}_${Math.random()
-                                                                            .toString(36)
-                                                                            .slice(2)}.jpg`
-
-                                                                        const buffer = Uint8Array.from(
-                                                                            atob(asset.base64),
-                                                                            (c) => c.charCodeAt(0)
-                                                                        )
-
-                                                                        const { error } = await supabase.storage
-                                                                            .from('property-images')
-                                                                            .upload(filename, buffer, {
-                                                                                contentType: 'image/jpeg',
-                                                                                upsert: false,
-                                                                            })
-
-                                                                        if (error) {
-                                                                            console.log('Upload error:', error)
-                                                                            continue
-                                                                        }
-
-                                                                        const { data } = supabase.storage
-                                                                            .from('property-images')
-                                                                            .getPublicUrl(filename)
-
+                                                                        const filename = `property_${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`
+                                                                        const buffer = Uint8Array.from(atob(asset.base64), (c) => c.charCodeAt(0))
+                                                                        const { error } = await supabase.storage.from('property-images').upload(filename, buffer, { contentType: 'image/jpeg', upsert: false })
+                                                                        if (error) continue
+                                                                        const { data } = supabase.storage.from('property-images').getPublicUrl(filename)
                                                                         uploadedUrls.push(data.publicUrl)
                                                                     }
-
                                                                     setEditImage((prev) => [...prev, ...uploadedUrls])
-                                                                } catch (err) {
-                                                                    console.log('Edit image upload error:', err)
+                                                                } catch {
                                                                     Alert.alert('Error', 'Failed to upload image(s).')
                                                                 } finally {
                                                                     setEditUploadingImage(false)
                                                                 }
                                                             }}
                                                         >
-                                                            <View
-                                                                style={{
-                                                                    minHeight: 180,
-                                                                    borderRadius: 14,
-                                                                    backgroundColor: C.surface,
-                                                                    padding: 8,
-                                                                }}
-                                                            >
+                                                            <View style={{ minHeight: 180, borderRadius: 14, backgroundColor: C.surface, padding: 8 }}>
                                                                 {editImage.length > 0 ? (
-                                                                    <ScrollView
-                                                                        style={{
-                                                                            maxHeight: 350,
-                                                                        }}
-                                                                        showsVerticalScrollIndicator={true}
-                                                                        nestedScrollEnabled
-                                                                        contentContainerStyle={{
-                                                                            flexDirection: 'row',
-                                                                            flexWrap: 'wrap',
-                                                                            gap: 8,
-                                                                        }}
-                                                                    >
+                                                                    <ScrollView style={{ maxHeight: 350 }} showsVerticalScrollIndicator nestedScrollEnabled contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                                                                         {editImage.map((img, index) => (
                                                                             <View key={index} style={{ position: 'relative' }}>
-                                                                                <Image
-                                                                                    source={{ uri: img }}
-                                                                                    style={{
-                                                                                        width: 150,
-                                                                                        height: 150,
-                                                                                        borderRadius: 12,
-                                                                                    }}
-                                                                                    resizeMode="cover"
-                                                                                />
-
+                                                                                <Image source={{ uri: img }} style={{ width: 150, height: 150, borderRadius: 12 }} resizeMode="cover" />
                                                                                 <TouchableOpacity
-                                                                                    onPress={() =>
-                                                                                        setEditImage((prev) =>
-                                                                                            prev.filter((_, i) => i !== index)
-                                                                                        )
-                                                                                    }
-                                                                                    style={{
-                                                                                        position: 'absolute',
-                                                                                        top: 6,
-                                                                                        right: 6,
-                                                                                        width: 28,
-                                                                                        height: 28,
-                                                                                        borderRadius: 14,
-                                                                                        backgroundColor: 'rgba(0,0,0,0.7)',
-                                                                                        alignItems: 'center',
-                                                                                        justifyContent: 'center',
-                                                                                    }}
+                                                                                    onPress={() => setEditImage((prev) => prev.filter((_, i) => i !== index))}
+                                                                                    style={{ position: 'absolute', top: 6, right: 6, width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center' }}
                                                                                 >
-                                                                                    <Text
-                                                                                        style={{
-                                                                                            color: '#fff',
-                                                                                            fontWeight: '700',
-                                                                                        }}
-                                                                                    >
-                                                                                        ✕
-                                                                                    </Text>
+                                                                                    <Text style={{ color: '#fff', fontWeight: '700' }}>✕</Text>
                                                                                 </TouchableOpacity>
                                                                             </View>
                                                                         ))}
                                                                     </ScrollView>
                                                                 ) : (
-                                                                    <Image
-                                                                        source={{
-                                                                            uri: p.images?.[0],
-                                                                        }}
-                                                                        style={{
-                                                                            width: '100%',
-                                                                            height: 180,
-                                                                            borderRadius: 14,
-                                                                            backgroundColor: C.surface,
-                                                                        }}
-                                                                        resizeMode="cover"
-                                                                    />
+                                                                    <Image source={{ uri: p.images?.[0] }} style={{ width: '100%', height: 180, borderRadius: 14, backgroundColor: C.surface }} resizeMode="cover" />
                                                                 )}
                                                             </View>
                                                         </TouchableOpacity>
-
                                                         {editUploadingImage && (
-                                                            <View
-                                                                style={{
-                                                                    position: 'absolute',
-                                                                    top: 0,
-                                                                    left: 0,
-                                                                    right: 0,
-                                                                    bottom: 0,
-                                                                    backgroundColor: 'rgba(0,0,0,0.45)',
-                                                                    borderRadius: 14,
-                                                                    alignItems: 'center',
-                                                                    justifyContent: 'center',
-                                                                }}
-                                                            >
+                                                            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 14, alignItems: 'center', justifyContent: 'center' }}>
                                                                 <ActivityIndicator color={C.white} size="large" />
-                                                                <Text
-                                                                    style={{
-                                                                        color: C.white,
-                                                                        marginTop: 8,
-                                                                        fontSize: 12,
-                                                                        fontWeight: '600',
-                                                                    }}
-                                                                >
-                                                                    Uploading...
-                                                                </Text>
+                                                                <Text style={{ color: C.white, marginTop: 8, fontSize: 12, fontWeight: '600' }}>Uploading...</Text>
                                                             </View>
                                                         )}
                                                     </View>
                                                 </View>
 
-                                                {/* Type pills for edit */}
                                                 <View>
-                                                    <Text style={{ marginBottom: 8, color: C.textPrimary, fontWeight: '700', fontSize: 13 }}>
-                                                        Property type
-                                                    </Text>
+                                                    <Text style={{ marginBottom: 8, color: C.textPrimary, fontWeight: '700', fontSize: 13 }}>Property type</Text>
                                                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
                                                         {PROPERTY_TYPES.map((item) => (
                                                             <TouchableOpacity
                                                                 key={item}
                                                                 activeOpacity={0.8}
                                                                 onPress={() => setEditForm((prev) => ({ ...prev, type: item }))}
-                                                                style={{
-                                                                    backgroundColor: editForm.type === item ? C.accent : C.surface,
-                                                                    paddingHorizontal: 14,
-                                                                    paddingVertical: 7,
-                                                                    borderRadius: 999,
-                                                                    borderWidth: 1,
-                                                                    borderColor: editForm.type === item ? C.accent : C.border,
-                                                                }}
+                                                                style={{ backgroundColor: editForm.type === item ? C.accent : C.surface, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: editForm.type === item ? C.accent : C.border }}
                                                             >
-                                                                <Text style={{
-                                                                    color: editForm.type === item ? C.white : C.textSecondary,
-                                                                    fontWeight: '700',
-                                                                    fontSize: 12,
-                                                                }}>
-                                                                    {item}
-                                                                </Text>
+                                                                <Text style={{ color: editForm.type === item ? C.white : C.textSecondary, fontWeight: '700', fontSize: 12 }}>{item}</Text>
                                                             </TouchableOpacity>
                                                         ))}
                                                     </ScrollView>
@@ -1558,71 +1546,43 @@ export default function Create() {
 
                                                 <Field label="City" value={editForm.city ?? ''} onChangeText={setEditField('city')} placeholder="Enter city" />
                                                 <Field label="Address" value={editForm.location ?? ''} onChangeText={setEditField('location')} placeholder="Enter address" />
-
                                                 <View style={{ flexDirection: 'row', gap: 10 }}>
                                                     <Field label="Bedrooms" value={editForm.bedrooms ?? ''} onChangeText={setEditField('bedrooms')} placeholder="3" numeric />
                                                     <Field label="Bathrooms" value={editForm.bathrooms ?? ''} onChangeText={setEditField('bathrooms')} placeholder="2" numeric />
                                                     <Field label="Sqft" value={editForm.sqft ?? ''} onChangeText={setEditField('sqft')} placeholder="1200" numeric />
                                                 </View>
-
                                                 <Field label="Description" value={editForm.description ?? ''} onChangeText={setEditField('description')} placeholder="Property description..." multiline />
                                                 <Field label="Owner Contact Number" value={editForm.contact_number ?? ''} onChangeText={setEditField('contact_number')} placeholder="Enter Contact Number" />
 
-                                                {/* Save / Cancel */}
                                                 <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
                                                     <TouchableOpacity
                                                         activeOpacity={0.8}
                                                         onPress={() => setEditingId(null)}
-                                                        style={{
-                                                            flex: 1,
-                                                            backgroundColor: C.surfaceAlt,
-                                                            height: 48,
-                                                            borderRadius: 14,
-                                                            justifyContent: 'center',
-                                                            alignItems: 'center',
-                                                            borderWidth: 1,
-                                                            borderColor: C.border,
-                                                        }}
+                                                        style={{ flex: 1, backgroundColor: C.surfaceAlt, height: 48, borderRadius: 14, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: C.border }}
                                                     >
-                                                        <Text style={{ color: C.textSecondary, fontSize: 14, fontWeight: '700' }}>
-                                                            Cancel
-                                                        </Text>
+                                                        <Text style={{ color: C.textSecondary, fontSize: 14, fontWeight: '700' }}>Cancel</Text>
                                                     </TouchableOpacity>
-
                                                     <TouchableOpacity
                                                         activeOpacity={0.85}
                                                         onPress={() => saveEdit(p.id)}
-                                                        style={{
-                                                            flex: 2,
-                                                            backgroundColor: C.accent,
-                                                            height: 48,
-                                                            borderRadius: 14,
-                                                            justifyContent: 'center',
-                                                            alignItems: 'center',
-                                                        }}
+                                                        style={{ flex: 2, backgroundColor: C.accent, height: 48, borderRadius: 14, justifyContent: 'center', alignItems: 'center' }}
                                                     >
-                                                        <Text style={{ color: C.white, fontSize: 14, fontWeight: '800' }}>
-                                                            Save Changes
-                                                        </Text>
+                                                        <Text style={{ color: C.white, fontSize: 14, fontWeight: '800' }}>Save Changes</Text>
                                                     </TouchableOpacity>
                                                 </View>
                                             </View>
                                         )}
                                     </View>
-
                                 ))}
-
                             </View>
-
                         )}
                     </View>
                 </ScrollView>
             </KeyboardAvoidingView>
-        </SafeAreaView >
+        </SafeAreaView>
     )
 }
 
-// Helper used for the upload overlay (avoids importing StyleSheet just for this)
 const StyleSheet_absoluteFill = {
     position: 'absolute' as const,
     top: 0, left: 0, right: 0, bottom: 0,
