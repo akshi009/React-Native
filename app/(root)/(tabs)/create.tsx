@@ -1,7 +1,7 @@
 import { useAuth, useUser } from '@clerk/expo'
 import { Ionicons } from '@expo/vector-icons'
 import * as ImagePicker from 'expo-image-picker'
-import { useFocusEffect } from 'expo-router'
+import { router, useFocusEffect } from 'expo-router'
 import React, { useCallback, useState } from 'react'
 import {
     ActivityIndicator,
@@ -150,7 +150,7 @@ export default function Create() {
     const [selectedImages, setSelectedImages] = useState<SelectedImage[]>([])
     const [publishing, setPublishing] = useState(false)
     const [uploadingImage, setUploadingImage] = useState(false)
-    const [editImage, setEditImage] = useState<string | null>(null)
+    const [editImage, setEditImage] = useState<string[]>([])
 
     const setField = (key: keyof FormState) => (val: string) =>
         setForm((prev) => ({ ...prev, [key]: val }))
@@ -177,7 +177,6 @@ export default function Create() {
                     setIsPaymentError(data.is_error_payment)
                 }
 
-                console.log(ispaymenterror, "ispaymenterror")
             }
             fetchErrorStatus()
         }, [user?.id])
@@ -194,7 +193,7 @@ export default function Create() {
                     .single()
 
                 if (!error && data) {
-                    setIsPaid(!!data)
+                    setIsPaid(data.is_payment_open)
                 }
             }
             fetchErrorStatus()
@@ -429,22 +428,21 @@ export default function Create() {
     // ── Start editing ──────────────────────────────────────────────────────
     const startEdit = (p: Property) => {
         setEditingId(p.id)
-
-        setEditImage(
-            p.images && p.images.length > 0
-                ? p.images[0]
-                : null
-        )
-
+        setEditImage(p.images || [])
         setEditForm({
             title: p.title,
             price: String(p.price),
-            location: [p.city, p.address].filter(Boolean).join(', '),
+            location: p.address,
+            city: p.city,
             description: p.description,
             bedrooms: String(p.bedrooms),
             bathrooms: String(p.bathrooms),
             sqft: String(p.area_sqft),
-            type: p.type,
+            contact_number: p.contact_number ?? '',
+            owner_email: p.owner_email ?? '',
+            type: p.type
+                ? p.type.charAt(0).toUpperCase() + p.type.slice(1)
+                : 'Apartment',
         })
     }
 
@@ -453,29 +451,26 @@ export default function Create() {
 
     // ── Save edit ──────────────────────────────────────────────────────────
     const saveEdit = async (id: string) => {
-        // FIX: Block save while image is still uploading
         if (editUploadingImage) {
             Alert.alert('Please wait', 'Image is still uploading.')
             return
         }
 
-        const [cityPart = '', ...addrParts] = (editForm.location ?? '').split(',').map((s) => s.trim())
-
-        // FIX: Include images so the newly uploaded image is actually saved to DB
         const updatePayload: Record<string, any> = {
             title: editForm.title,
             description: editForm.description,
             price: Number(editForm.price) || 0,
-            type: editForm.type,
-            city: cityPart,
-            address: addrParts.join(', ') || cityPart,
+            type: (editForm.type ?? 'apartment').toLowerCase(),
+            city: editForm.city ?? '',
+            address: editForm.location ?? '',
             bedrooms: Number(editForm.bedrooms) || 0,
             bathrooms: Number(editForm.bathrooms) || 0,
             area_sqft: Number(editForm.sqft) || 0,
+            contact_number: editForm.contact_number ?? '',
         }
 
-        if (editImage) {
-            updatePayload.images = [editImage]
+        if (editImage.length > 0) {
+            updatePayload.images = editImage
         }
 
         const { error } = await supabase
@@ -679,9 +674,9 @@ export default function Create() {
                             <Text style={{ color: '#fff', fontSize: 28, fontWeight: '800', lineHeight: 34, marginBottom: 8, letterSpacing: -0.5 }}>
                                 List your properties.{'\n'}Reach real buyers.
                             </Text>
-                            <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 14 }}>
+                            {/* <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 14 }}>
                                 Upgrade to Pro and go live today.
-                            </Text>
+                            </Text> */}
                         </SafeAreaView>
                     </View>
 
@@ -691,7 +686,7 @@ export default function Create() {
                         {/* Drag handle */}
                         <View style={{
                             width: 36, height: 4, borderRadius: 999,
-                            backgroundColor: '#E0E0E0', alignSelf: 'center', marginBottom: 26,
+                            backgroundColor: '#E0E0E0', alignSelf: 'center', marginBottom: 10,
                         }} />
 
                         {ispaymenterror && (
@@ -789,7 +784,7 @@ export default function Create() {
                         ))}
 
                         {/* Divider */}
-                        <View style={{ borderTopWidth: 0.5, borderColor: C.border, marginVertical: 20 }} />
+                        <View style={{ borderTopWidth: 0.5, borderColor: C.border, marginVertical: 10 }} />
 
                         {/* CTA */}
                         <TouchableOpacity
@@ -1062,7 +1057,7 @@ export default function Create() {
                             placeholder="Udaipur"
                         />
                         <Field
-                            label="Location"
+                            label="Address"
                             value={form.location}
                             onChangeText={setField('location')}
                             placeholder="Udaipur, Rajasthan"
@@ -1226,6 +1221,8 @@ export default function Create() {
                                     >
                                         {/* Property summary row */}
                                         <View style={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 12 }}>
+
+
                                             <View
                                                 style={{
                                                     flexDirection: 'row',
@@ -1275,35 +1272,36 @@ export default function Create() {
                                                     </Text>
                                                 </TouchableOpacity>
                                             </View>
+                                            <TouchableOpacity onPress={() => router.push({ pathname: '/property/[id]', params: { id: p.id } })}>
 
-                                            <Image
-                                                source={{ uri: (p.images && p.images.length > 0) ? p.images[0] : 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80' }}
-                                                style={{
-                                                    width: '100%',
-                                                    height: 156,
-                                                    borderRadius: 16,
-                                                    backgroundColor: C.surfaceAlt,
-                                                    marginBottom: 8,
-                                                }}
-                                                resizeMode="cover"
-                                            />
+                                                <Image
+                                                    source={{ uri: (p.images && p.images.length > 0) ? p.images[0] : 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80' }}
+                                                    style={{
+                                                        width: '100%',
+                                                        height: 156,
+                                                        borderRadius: 16,
+                                                        backgroundColor: C.surfaceAlt,
+                                                        marginBottom: 8,
+                                                    }}
+                                                    resizeMode="cover"
+                                                />
 
-                                            <View style={{ marginBottom: 4 }}>
-                                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 4 }}>
-                                                    <View style={{ flex: 1 }}>
+                                                <View style={{ marginBottom: 4 }}>
+                                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 4 }}>
+                                                        <View style={{ flex: 1 }}>
 
-                                                        <Text numberOfLines={2} style={{ fontSize: 12, fontWeight: '700', color: C.textPrimary, lineHeight: 16 }}>
-                                                            {p.title}
+                                                            <Text numberOfLines={2} style={{ fontSize: 12, fontWeight: '700', color: C.textPrimary, lineHeight: 16 }}>
+                                                                {p.title}
+                                                            </Text>
+                                                        </View>
+                                                    </View>
+                                                    <View>
+                                                        <Text style={{ fontSize: 10, fontWeight: '700', color: C.textPrimary }}>
+                                                            {p.type[0].toUpperCase() + p.type.slice(1)}
                                                         </Text>
                                                     </View>
                                                 </View>
-                                                <View>
-                                                    <Text style={{ fontSize: 10, fontWeight: '700', color: C.textPrimary }}>
-                                                        {p.type[0].toUpperCase() + p.type.slice(1)}
-                                                    </Text>
-                                                </View>
-                                            </View>
-
+                                            </TouchableOpacity>
                                             <Text numberOfLines={1} style={{ fontSize: 11, color: C.textSecondary, marginBottom: 8 }}>
                                                 {[p.address, p.city].filter(Boolean).join(', ')}
                                             </Text>
@@ -1329,6 +1327,7 @@ export default function Create() {
                                                 </View>
                                             </View> */}
                                         </View>
+
 
                                         {/* ── Inline edit panel ── */}
                                         {editingId === p.id && (
@@ -1360,82 +1359,164 @@ export default function Create() {
                                                             activeOpacity={0.8}
                                                             onPress={async () => {
                                                                 const result = await ImagePicker.launchImageLibraryAsync({
-                                                                    mediaTypes: ['images'] as any,
-                                                                    allowsEditing: true,
-                                                                    aspect: [4, 3],
+                                                                    mediaTypes: 'images',
+                                                                    allowsMultipleSelection: true,
+                                                                    selectionLimit: 10,
                                                                     quality: 0.8,
                                                                     base64: true,
+
                                                                 })
 
                                                                 if (result.canceled || !result.assets?.length) return
 
-                                                                const asset = result.assets[0]
-                                                                if (!asset.base64) return
-
-                                                                // Show local preview immediately while uploading
-                                                                setEditImage(asset.uri)
                                                                 setEditUploadingImage(true)
 
                                                                 try {
-                                                                    const filename = `property_${Date.now()}_${Math.random()
-                                                                        .toString(36)
-                                                                        .slice(2)}.jpg`
+                                                                    const uploadedUrls: string[] = []
 
-                                                                    const buffer = Uint8Array.from(
-                                                                        atob(asset.base64),
-                                                                        (c) => c.charCodeAt(0)
-                                                                    )
+                                                                    for (const asset of result.assets) {
+                                                                        if (!asset.base64) continue
 
-                                                                    const { error } = await supabase.storage
-                                                                        .from('property-images')
-                                                                        .upload(filename, buffer, {
-                                                                            contentType: 'image/jpeg',
-                                                                            upsert: false,
-                                                                        })
+                                                                        const filename = `property_${Date.now()}_${Math.random()
+                                                                            .toString(36)
+                                                                            .slice(2)}.jpg`
 
-                                                                    if (error) {
-                                                                        Alert.alert('Upload Failed', error.message)
-                                                                        return
+                                                                        const buffer = Uint8Array.from(
+                                                                            atob(asset.base64),
+                                                                            (c) => c.charCodeAt(0)
+                                                                        )
+
+                                                                        const { error } = await supabase.storage
+                                                                            .from('property-images')
+                                                                            .upload(filename, buffer, {
+                                                                                contentType: 'image/jpeg',
+                                                                                upsert: false,
+                                                                            })
+
+                                                                        if (error) {
+                                                                            console.log('Upload error:', error)
+                                                                            continue
+                                                                        }
+
+                                                                        const { data } = supabase.storage
+                                                                            .from('property-images')
+                                                                            .getPublicUrl(filename)
+
+                                                                        uploadedUrls.push(data.publicUrl)
                                                                     }
 
-                                                                    const { data } = supabase.storage
-                                                                        .from('property-images')
-                                                                        .getPublicUrl(filename)
-
-                                                                    // Store public URL — saveEdit will use this
-                                                                    setEditImage(data.publicUrl)
+                                                                    setEditImage((prev) => [...prev, ...uploadedUrls])
                                                                 } catch (err) {
                                                                     console.log('Edit image upload error:', err)
-                                                                    Alert.alert('Error', 'Failed to upload image.')
+                                                                    Alert.alert('Error', 'Failed to upload image(s).')
                                                                 } finally {
                                                                     setEditUploadingImage(false)
                                                                 }
                                                             }}
                                                         >
-                                                            <Image
-                                                                source={{
-                                                                    uri: editImage || p.images?.[0],
-                                                                }}
+                                                            <View
                                                                 style={{
-                                                                    width: '100%',
-                                                                    height: 180,
+                                                                    minHeight: 180,
                                                                     borderRadius: 14,
                                                                     backgroundColor: C.surface,
+                                                                    padding: 8,
                                                                 }}
-                                                                resizeMode="cover"
-                                                            />
+                                                            >
+                                                                {editImage.length > 0 ? (
+                                                                    <ScrollView
+                                                                        style={{
+                                                                            maxHeight: 350,
+                                                                        }}
+                                                                        showsVerticalScrollIndicator={true}
+                                                                        nestedScrollEnabled
+                                                                        contentContainerStyle={{
+                                                                            flexDirection: 'row',
+                                                                            flexWrap: 'wrap',
+                                                                            gap: 8,
+                                                                        }}
+                                                                    >
+                                                                        {editImage.map((img, index) => (
+                                                                            <View key={index} style={{ position: 'relative' }}>
+                                                                                <Image
+                                                                                    source={{ uri: img }}
+                                                                                    style={{
+                                                                                        width: 150,
+                                                                                        height: 150,
+                                                                                        borderRadius: 12,
+                                                                                    }}
+                                                                                    resizeMode="cover"
+                                                                                />
+
+                                                                                <TouchableOpacity
+                                                                                    onPress={() =>
+                                                                                        setEditImage((prev) =>
+                                                                                            prev.filter((_, i) => i !== index)
+                                                                                        )
+                                                                                    }
+                                                                                    style={{
+                                                                                        position: 'absolute',
+                                                                                        top: 6,
+                                                                                        right: 6,
+                                                                                        width: 28,
+                                                                                        height: 28,
+                                                                                        borderRadius: 14,
+                                                                                        backgroundColor: 'rgba(0,0,0,0.7)',
+                                                                                        alignItems: 'center',
+                                                                                        justifyContent: 'center',
+                                                                                    }}
+                                                                                >
+                                                                                    <Text
+                                                                                        style={{
+                                                                                            color: '#fff',
+                                                                                            fontWeight: '700',
+                                                                                        }}
+                                                                                    >
+                                                                                        ✕
+                                                                                    </Text>
+                                                                                </TouchableOpacity>
+                                                                            </View>
+                                                                        ))}
+                                                                    </ScrollView>
+                                                                ) : (
+                                                                    <Image
+                                                                        source={{
+                                                                            uri: p.images?.[0],
+                                                                        }}
+                                                                        style={{
+                                                                            width: '100%',
+                                                                            height: 180,
+                                                                            borderRadius: 14,
+                                                                            backgroundColor: C.surface,
+                                                                        }}
+                                                                        resizeMode="cover"
+                                                                    />
+                                                                )}
+                                                            </View>
                                                         </TouchableOpacity>
+
                                                         {editUploadingImage && (
-                                                            <View style={{
-                                                                position: 'absolute',
-                                                                top: 0, left: 0, right: 0, bottom: 0,
-                                                                backgroundColor: 'rgba(0,0,0,0.45)',
-                                                                borderRadius: 14,
-                                                                alignItems: 'center',
-                                                                justifyContent: 'center',
-                                                            }}>
+                                                            <View
+                                                                style={{
+                                                                    position: 'absolute',
+                                                                    top: 0,
+                                                                    left: 0,
+                                                                    right: 0,
+                                                                    bottom: 0,
+                                                                    backgroundColor: 'rgba(0,0,0,0.45)',
+                                                                    borderRadius: 14,
+                                                                    alignItems: 'center',
+                                                                    justifyContent: 'center',
+                                                                }}
+                                                            >
                                                                 <ActivityIndicator color={C.white} size="large" />
-                                                                <Text style={{ color: C.white, marginTop: 8, fontSize: 12, fontWeight: '600' }}>
+                                                                <Text
+                                                                    style={{
+                                                                        color: C.white,
+                                                                        marginTop: 8,
+                                                                        fontSize: 12,
+                                                                        fontWeight: '600',
+                                                                    }}
+                                                                >
                                                                     Uploading...
                                                                 </Text>
                                                             </View>
@@ -1475,7 +1556,8 @@ export default function Create() {
                                                     </ScrollView>
                                                 </View>
 
-                                                <Field label="Location" value={editForm.location ?? ''} onChangeText={setEditField('location')} placeholder="City, Address" />
+                                                <Field label="City" value={editForm.city ?? ''} onChangeText={setEditField('city')} placeholder="Enter city" />
+                                                <Field label="Address" value={editForm.location ?? ''} onChangeText={setEditField('location')} placeholder="Enter address" />
 
                                                 <View style={{ flexDirection: 'row', gap: 10 }}>
                                                     <Field label="Bedrooms" value={editForm.bedrooms ?? ''} onChangeText={setEditField('bedrooms')} placeholder="3" numeric />
@@ -1484,6 +1566,7 @@ export default function Create() {
                                                 </View>
 
                                                 <Field label="Description" value={editForm.description ?? ''} onChangeText={setEditField('description')} placeholder="Property description..." multiline />
+                                                <Field label="Owner Contact Number" value={editForm.contact_number ?? ''} onChangeText={setEditField('contact_number')} placeholder="Enter Contact Number" />
 
                                                 {/* Save / Cancel */}
                                                 <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
@@ -1526,8 +1609,11 @@ export default function Create() {
                                             </View>
                                         )}
                                     </View>
+
                                 ))}
+
                             </View>
+
                         )}
                     </View>
                 </ScrollView>
