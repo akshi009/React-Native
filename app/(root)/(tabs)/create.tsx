@@ -1,9 +1,10 @@
-import { useAuth, useUser } from '@clerk/expo'
-import { Ionicons } from '@expo/vector-icons'
-import * as ImagePicker from 'expo-image-picker'
-import { router, useFocusEffect } from 'expo-router'
-import QRCode from 'qrcode'
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { useAuth, useUser } from '@clerk/expo';
+import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
+import * as ImagePicker from 'expo-image-picker';
+import { router, useFocusEffect } from 'expo-router';
+import QRCode from 'qrcode';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -19,12 +20,13 @@ import {
     TextInput,
     TouchableOpacity,
     View,
-} from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
-import { fetchProperty } from '../../../hooks/property'
-import { createClerkSupabaseClient } from '../../../lib/supabase'
-import { useProductStore } from '../../../store/productStore'
-import { useUserStore } from '../../../store/userStore'
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import Toast from 'react-native-toast-message';
+import { fetchProperty } from '../../../hooks/property';
+import { createClerkSupabaseClient } from '../../../lib/supabase';
+import { useProductStore } from '../../../store/productStore';
+import { useUserStore } from '../../../store/userStore';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window')
 const CARD_WIDTH = (SCREEN_WIDTH - 44) / 2
@@ -169,6 +171,7 @@ export default function Create() {
     // ── QR code modal state ────────────────────────────────────────────────
     const [showQRModal, setShowQRModal] = useState(false)
     const [qrCodeDataUrl, setQrCodeDataUrl] = useState('')
+    const [isError, setIsError] = useState(false)
     const [showDoneModal, setShowDoneModal] = useState(false)
     const appState = useRef<AppStateStatus>(AppState.currentState)
     const shouldShowDoneModal = useRef(false)
@@ -183,6 +186,20 @@ export default function Create() {
                     .eq('clerk_id', user.id)
                     .single()
                 if (!error && data) setIsPaid(data.is_payment_open)
+            }
+            fetchPaymentStatus()
+        }, [user?.id])
+    )
+    useFocusEffect(
+        useCallback(() => {
+            const fetchPaymentStatus = async () => {
+                if (!user?.id) return
+                const { data, error } = await supabase
+                    .from('users')
+                    .select('is_error_payment')
+                    .eq('clerk_id', user.id)
+                    .single()
+                if (!error && data) setIsError(data.is_error_payment)
             }
             fetchPaymentStatus()
         }, [user?.id])
@@ -229,9 +246,19 @@ export default function Create() {
 
     // ── Notify owner via WhatsApp & Email ─────────────────────────────────
     const notifyOwner = async (payerName: string, method: string) => {
-        const message = `New payment received!\nFrom: ${payerName}\nAmount: ₹${process.env.EXPO_PUBLIC_AMOUNT}\nMethod: ${method}\nTime: ${new Date().toLocaleString('en-IN')}`
+        const message = `Payment Done!\nFrom: ${payerName}\n Email: ${user?.emailAddresses?.[0]?.emailAddress}\nAmount: ₹${process.env.EXPO_PUBLIC_AMOUNT}\nMethod: ${method}\nTime: ${new Date().toLocaleString('en-IN')}`
         const encodedMessage = encodeURIComponent(message)
         const phone = OWNER_WHATSAPP.replace(/[^\d]/g, '')
+
+        if (OWNER_EMAIL) {
+            const mailUrl = `mailto:${OWNER_EMAIL}?subject=${encodeURIComponent('Payment Done')}&body=${encodedMessage}`
+            try {
+                await Linking.openURL(mailUrl)
+                return true
+            } catch {
+                // fall through to error below
+            }
+        }
 
         // WhatsApp notification
         if (phone) {
@@ -250,15 +277,7 @@ export default function Create() {
             }
         }
 
-        if (OWNER_EMAIL) {
-            const mailUrl = `mailto:${OWNER_EMAIL}?subject=${encodeURIComponent('New Payment Received')}&body=${encodedMessage}`
-            try {
-                await Linking.openURL(mailUrl)
-                return true
-            } catch {
-                // fall through to error below
-            }
-        }
+
 
         throw new Error('No owner notification app could be opened.')
     }
@@ -267,9 +286,10 @@ export default function Create() {
     const savePaymentSuccess = async () => {
         await supabase
             .from('users')
-            .update({ is_payment_open: true })
+            .update({ is_payment_open: true, is_error_payment: false })
             .eq('clerk_id', user?.id)
         setIsPaid(true)
+        setIsError(false)
     }
 
     // ── Payment method selector ───────────────────────────────────────────
@@ -597,6 +617,11 @@ export default function Create() {
         )
     }
 
+    const handlesupport = async () => {
+        const message = "Hello Support, my payment did not go through as expected. Please find the attached screenshot and assist.";
+        await Linking.openURL(`mailto:${OWNER_EMAIL}?subject=${('Payment Support')}&body=${message}`)
+    }
+
     // ── Not admin view ─────────────────────────────────────────────────────
     if (!isAdmin) {
         return (
@@ -668,22 +693,63 @@ export default function Create() {
                                     flexDirection: 'row',
                                     alignItems: 'flex-start',
                                     gap: 12,
-                                    backgroundColor: '#F0FDF4',
+                                    backgroundColor: '#fdfdf0ff',
                                     borderRadius: 14,
                                     borderWidth: 1,
-                                    borderColor: '#BBF7D0',
+                                    borderColor: '#f7f5bbff',
                                     padding: 14,
                                     marginBottom: 16,
                                 }}
                             >
-                                <Ionicons name="checkmark-circle" size={20} color="#16A34A" style={{ marginTop: 1 }} />
+                                <Ionicons name="checkmark-circle" size={20} color="#a36d16ff" style={{ marginTop: 1 }} />
                                 <View style={{ flex: 1 }}>
-                                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#15803D', marginBottom: 3 }}>
-                                        Payment received!
+                                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#a36d16ff', marginBottom: 3 }}>
+                                        Awaiting payment confirmation
                                     </Text>
-                                    <Text style={{ fontSize: 12, color: '#166534', lineHeight: 18 }}>
-                                        Thanks! Your access will be activated within 24–48 hours. We'll notify you once
-                                        it's live.
+                                    <Text style={{ fontSize: 12, color: '#a36d16ff', lineHeight: 18 }}>
+                                        Once our team confirms your payment, your subscription will be activated. This usually takes 24–48 hours, and we'll notify you as soon as it's active.
+                                    </Text>
+                                </View>
+                            </View>
+                        )}
+                        {isError && (
+                            <View
+                                style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'flex-start',
+                                    gap: 12,
+                                    backgroundColor: '#fdf0f0ff',
+                                    borderRadius: 14,
+                                    borderWidth: 1,
+                                    borderColor: '#f7bbbbff',
+                                    padding: 14,
+                                    marginBottom: 16,
+                                }}
+                            >
+                                <Ionicons name="close-circle" size={20} color="#991B1B" style={{ marginTop: 1 }} />
+                                <View style={{ flex: 1 }}>
+                                    <Text
+                                        style={{
+                                            fontSize: 13,
+                                            fontWeight: '700',
+                                            color: '#B91C1C',
+                                            marginBottom: 3,
+                                        }}
+                                    >
+                                        Payment submission rejected
+                                    </Text>
+                                    <Text
+                                        style={{
+                                            fontSize: 12,
+                                            color: '#991B1B',
+                                            lineHeight: 18,
+                                        }}
+                                    >
+                                        The submitted payment information could not be verified. Please send a valid payment screenshot to{" "}
+                                        <Text onPress={handlesupport} style={{ color: '#991B1B', fontWeight: 'bold', textDecorationLine: 'underline' }}>
+                                            {OWNER_EMAIL}
+                                        </Text>{" "}
+                                        for manual verification.
                                     </Text>
                                 </View>
                             </View>
@@ -836,8 +902,6 @@ export default function Create() {
                                 Scan the QR code using any UPI app (Google Pay, PhonePe, Paytm) to pay ₹{process.env.EXPO_PUBLIC_AMOUNT}
                             </Text>
 
-                            {/* QR Code Image */}
-                            {/* {qrCodeDataUrl ? ( */}
                             <Image
                                 source={require('../../../assets/images/paymentQr.jpeg')}
                                 // source={{ uri: qrCodeDataUrl }}
@@ -849,6 +913,15 @@ export default function Create() {
                                 }}
                                 resizeMode="cover"
                             />
+                            <Text onPress={async () => {
+                                await Clipboard.setStringAsync(`${process.env.EXPO_PUBLIC_PAYE_VPA}`);
+                                Toast.show({
+                                    type: 'success',
+                                    text1: 'UPI ID Copied!',
+                                })
+                            }}>
+                                UPI ID: {process.env.EXPO_PUBLIC_PAYE_VPA}
+                            </Text>
                             {/* ) : (
                                 <View
                                     style={{
@@ -963,13 +1036,13 @@ export default function Create() {
                                 Payment Done ?
                             </Text>
                             <Text style={{ fontSize: 13, color: C.textSecondary, textAlign: 'center', lineHeight: 20 }}>
-                                If Payment is Done Successfully, then you can tap Done. So That after 24-48hrs your status get Updated.
+                                If Payment is Done Successfully, then you can tap Done. So That after 24-48 hrs your status get Updated.
                             </Text>
                             <Text style={{ fontSize: 12, color: C.textMuted, textAlign: 'center', lineHeight: 18 }}>
-                                Otherwise Contact the Admin For more details.
+                                Otherwise Contact the Support Team For more details.
                             </Text>
                             <Text onPress={() => Linking.openURL(`mailto:${OWNER_EMAIL}`)} style={{ fontSize: 12, color: C.success, textAlign: 'center', lineHeight: 18, textDecorationLine: 'underline', textDecorationColor: C.success, textDecorationStyle: 'solid' }}>
-                                Mail at : {OWNER_EMAIL || 'the admin email'}
+                                Contact Support
                             </Text>
 
                             <View style={{ flexDirection: 'row', gap: 10, width: '100%' }}>
