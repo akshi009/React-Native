@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "mobile",
-    "slug": "mobile",
+    "name": "bricknest",
+    "slug": "bricknest",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/kribb.png",
-    "scheme": "mobile",
+    "icon": "./assets/images/bricknest.png",
+    "scheme": "bricknest",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -24,9 +24,9 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/kribb.png",
-        "backgroundImage": "./assets/images/kribb.png",
-        "monochromeImage": "./assets/images/kribb.png"
+        "foregroundImage": "./assets/images/bricknest.png",
+        "backgroundImage": "./assets/images/bricknest.png",
+        "monochromeImage": "./assets/images/bricknest.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -34,7 +34,7 @@
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/kribb.png"
+      "favicon": "./assets/images/bricknest.png"
     },
     "plugins": [
       "expo-router",

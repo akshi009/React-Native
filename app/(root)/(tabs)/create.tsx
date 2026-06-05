@@ -107,6 +107,7 @@ function Field({
     placeholder,
     numeric,
     multiline,
+    required
 }: {
     label: string
     value: string
@@ -114,11 +115,13 @@ function Field({
     placeholder?: string
     numeric?: boolean
     multiline?: boolean
+    required?: boolean
 }) {
     return (
         <View style={{ flex: 1 }}>
             <Text style={{ marginBottom: 6, color: C.textPrimary, fontWeight: '700', fontSize: 13 }}>
                 {label}
+                {required && <Text style={{ color: C.danger }}>*</Text>}
             </Text>
             <TextInput
                 value={value}
@@ -1313,7 +1316,7 @@ export default function Create() {
                         </View>
 
                         <Field label="Description" value={form.description} onChangeText={setField('description')} placeholder="Describe your property..." multiline />
-                        <Field label="Owner Contact Number" value={form.contact_number} onChangeText={setField('contact_number')} placeholder="0987654321" numeric />
+                        <Field label="Owner Contact Number" required={true} value={form.contact_number} onChangeText={setField('contact_number')} placeholder="0987654321" numeric />
 
                         <TouchableOpacity
                             activeOpacity={0.85}
@@ -1625,7 +1628,8 @@ export default function Create() {
                                                     <Field label="Sqft" value={editForm.sqft ?? ''} onChangeText={setEditField('sqft')} placeholder="1200" numeric />
                                                 </View>
                                                 <Field label="Description" value={editForm.description ?? ''} onChangeText={setEditField('description')} placeholder="Property description..." multiline />
-                                                <Field label="Owner Contact Number" value={editForm.contact_number ?? ''} onChangeText={setEditField('contact_number')} placeholder="Enter Contact Number" />
+
+                                                <Field label="Owner Contact Number" required={true} value={editForm.contact_number ?? ''} onChangeText={setEditField('contact_number')} placeholder="Enter Contact Number" />
 
                                                 <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
                                                     <TouchableOpacity

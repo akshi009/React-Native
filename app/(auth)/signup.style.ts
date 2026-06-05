@@ -30,9 +30,10 @@ export const style = StyleSheet.create({
     },
 
     logo: {
-        width: 50,
-        height: 50,
-        marginBottom: 25,
+        width: 100,
+        height: 100,
+        alignSelf: 'flex-start',
+        marginLeft: -20,
     },
 
     heading: {

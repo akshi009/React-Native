@@ -92,11 +92,11 @@ const SignUp = () => {
                 <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
                     <ScrollView keyboardShouldPersistTaps="handled">
                         <View style={style.container}>
-                            <Image
-                                source={require('../../assets/images/kribb.png')}
+                            {/* <Image
+                                source={require('../../assets/images/bricknest.png')}
                                 style={style.logo}
                                 resizeMode='contain'
-                            />
+                            /> */}
 
                             <Text style={style.heading}>Sign Up</Text>
 
@@ -150,7 +150,7 @@ const SignUp = () => {
                 <ScrollView keyboardShouldPersistTaps="handled">
                     <View style={style.container}>
                         <Image
-                            source={require('../../assets/images/kribb.png')}
+                            source={require('../../assets/images/bricknest.png')}
                             style={style.logo}
                             resizeMode='contain'
                         />

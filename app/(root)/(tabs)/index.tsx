@@ -5,6 +5,7 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import {
     Dimensions,
     FlatList,
+    Image,
     NativeScrollEvent,
     NativeSyntheticEvent,
     ScrollView,
@@ -126,12 +127,23 @@ export default function Home() {
                 {/* ── Header ── */}
                 <View style={{
                     flexDirection: 'row',
-                    justifyContent: 'flex-end',
+                    justifyContent: 'space-between',
                     alignItems: 'center',
                     paddingHorizontal: 20,
-                    paddingTop: 12,
-                    paddingBottom: 4,
+                    // paddingTop: 12,
+                    // paddingBottom: 4,
                 }}>
+                    <Image
+                        source={require('../../../assets/images/bricknest.png')}
+                        style={{
+                            width: 100,
+                            height: 100,
+                            // alignSelf: 'flex-start',
+                            marginLeft: -20,
+                        }}
+                        resizeMode='contain'
+                    />
+
                     <TouchableOpacity
                         onPress={() => router.push('/(root)/(tabs)/profile')}
                         style={{
@@ -144,6 +156,7 @@ export default function Home() {
                             borderWidth: 1,
                             borderColor: C.border,
                             overflow: 'hidden',
+                            marginTop: -12
                         }}
                     >
                         <Text style={{ color: C.textPrimary, fontWeight: '700', fontSize: 14 }}>
